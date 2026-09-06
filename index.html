@@ -3599,7 +3599,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   // ── URL do GAS embutida como padrão ─────────────────────────────────
   // Se não houver URL salva no localStorage, usar a URL padrão embutida.
   // Isso garante que computadores novos funcionam sem configuração manual.
-  var GAS_URL_PADRAO = 'https://script.google.com/macros/s/AKfycbzabYjV2Fgu8HoSXonRPRvzuiHNKaFGpMKD8SyEsScox0tm-PB0oBGI4deVbNDUV87LNA/exec';
+  var GAS_URL_PADRAO = 'https://script.google.com/macros/s/AKfycbzUWA01ltHC3VBSKJZrr1F7D-6u_9LC67itv9KxkTJGFWRaJ7awdftYR1dr6yfuEYL__g/exec';
   if(!localStorage.getItem('gasUrl') && GAS_URL_PADRAO) {
     localStorage.setItem('gasUrl', GAS_URL_PADRAO);
     console.log('[INIT] URL do GAS definida automaticamente:', GAS_URL_PADRAO);
