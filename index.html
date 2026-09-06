@@ -4863,18 +4863,13 @@ function gasPost(acao, dados) {
   });
 }
 
-// GET para o GAS com redirect:follow
+// gasGet: internamente usa POST (via gasPost) para evitar bloqueio de CORS
+// que pode ocorrer em requisições GET cross-origin (ex: site no GitHub Pages
+// chamando um Web App do Google Apps Script em domínio diferente).
+// Mantém a mesma assinatura de antes — quem chama gasGet(acao, params)
+// não precisa mudar nada.
 function gasGet(acao, params) {
-  var gasUrl = localStorage.getItem('gasUrl');
-  if(!gasUrl) return Promise.resolve({ ok:false, erro:'GAS nao configurado' });
-  var qs = 'acao='+acao;
-  if(params) Object.keys(params).forEach(function(k){ qs += '&'+k+'='+encodeURIComponent(params[k]); });
-  return fetch(gasUrl+'?'+qs, { redirect:'follow' })
-    .then(function(r) { return r.text(); })
-    .then(function(txt) {
-      if(txt.trim()[0]==='<') throw new Error('GAS retornou HTML. Verifique deploy: acesso = Qualquer pessoa');
-      return JSON.parse(txt);
-    });
+  return gasPost(acao, params || {});
 }
 
 // Drena a fila de acionamentos pendentes
