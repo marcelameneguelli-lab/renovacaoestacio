@@ -1322,6 +1322,13 @@ ${_buildDashFu()}`;
   window._curvaVis = { dig: true, pres: true };
 
   setTimeout(()=>{
+    // Se o Chart.js não carregou (bloqueado por proteção de rastreamento,
+    // ad-block, extensão, rede corporativa, etc.), não travar o dashboard —
+    // apenas avisar uma vez no console e pular a criação dos gráficos.
+    if(typeof Chart === 'undefined') {
+      console.warn('[DASH] Chart.js não carregou — gráficos desabilitados nesta sessão, mas o restante do sistema funciona normalmente.');
+      return;
+    }
     // ── CURVA CHART ──────────────────────────────────────────
     const ctxCurva = document.getElementById('ch-curva');
     if(ctxCurva && (digOk||presOk)) {
@@ -3613,13 +3620,18 @@ document.addEventListener('DOMContentLoaded',()=>{
     }
   })();
 
-  // ── URL do GAS embutida como padrão ─────────────────────────────────
-  // Se não houver URL salva no localStorage, usar a URL padrão embutida.
-  // Isso garante que computadores novos funcionam sem configuração manual.
+  // ── URL do GAS embutida como padrão, com versionamento ──────────────
+  // Toda vez que GAS_URL_VERSAO mudar aqui no arquivo, TODOS os navegadores
+  // (mesmo com uma URL antiga já salva) vão atualizar automaticamente para
+  // a URL nova. Sem isso, cada navegador ficava preso na URL de quando
+  // visitou o sistema pela primeira vez, mesmo depois de trocarmos o GAS.
   var GAS_URL_PADRAO = 'https://script.google.com/macros/s/AKfycbzUWA01ltHC3VBSKJZrr1F7D-6u_9LC67itv9KxkTJGFWRaJ7awdftYR1dr6yfuEYL__g/exec';
-  if(!localStorage.getItem('gasUrl') && GAS_URL_PADRAO) {
+  var GAS_URL_VERSAO = '2026-09-06-01'; // ← mude esta string sempre que atualizar a URL acima
+  if (GAS_URL_PADRAO && localStorage.getItem('gasUrlVersao') !== GAS_URL_VERSAO) {
+    var _urlAntiga = localStorage.getItem('gasUrl');
     localStorage.setItem('gasUrl', GAS_URL_PADRAO);
-    console.log('[INIT] URL do GAS definida automaticamente:', GAS_URL_PADRAO);
+    localStorage.setItem('gasUrlVersao', GAS_URL_VERSAO);
+    console.log('[INIT] URL do GAS atualizada automaticamente (versão ' + GAS_URL_VERSAO + '):', GAS_URL_PADRAO, _urlAntiga ? '(antiga: ' + _urlAntiga + ')' : '');
   }
 
   // Carregar histórico completo do GAS e iniciar sync
@@ -3932,6 +3944,10 @@ function renderProd() {
 
   // ── CHARTS ────────────────────────────────────────────────────
   setTimeout(() => {
+    if(typeof Chart === 'undefined') {
+      console.warn('[PROD] Chart.js não carregou — gráficos desabilitados nesta sessão.');
+      return;
+    }
     const nomes = lista.map(c=>c.nome.split(' ')[0]+(lista.length>5?'':' '+c.nome.split(' ')[1]||''));
 
     // 1. Grouped bar — comparativo
