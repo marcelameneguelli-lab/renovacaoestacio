@@ -2543,13 +2543,30 @@ function processCSV(file) {
       // Sincronizar com GAS
       const _gasUrl = localStorage.getItem('gasUrl');
       if(_gasUrl) {
+        mostrarToast('Enviando base para o servidor (pode levar alguns segundos)...');
         gasPost('importar_alunos', { alunos: novos })
           .then(function(d){
-            if(d.ok) {
-              mostrarToast('Base salva no servidor! Os demais atendentes verão ao abrir o sistema.');
+            if(d.ok && d.semConfirmacao) {
+              // Payload grande — foi enviado via POST sem leitura de resposta.
+              // Confirma silenciosamente lendo a base de volta do servidor.
+              setTimeout(function(){
+                gasGet('ping').then(function(p){
+                  if(p && p.totalAlunos > 0) {
+                    mostrarToast('&#10003; Base salva no servidor (' + p.totalAlunos + ' alunos)! Os demais atendentes verão ao abrir o sistema.');
+                  } else {
+                    mostrarToast('&#9888;️ Base enviada, mas não foi possível confirmar. Verifique em Admin.');
+                  }
+                }).catch(function(){});
+              }, 4000);
+            } else if(d.ok) {
+              mostrarToast('&#10003; Base salva no servidor! Os demais atendentes verão ao abrir o sistema.');
+            } else {
+              mostrarToast('&#9888;️ Erro ao salvar no servidor: ' + (d.erro||'desconhecido'));
             }
           })
-          .catch(function(){});
+          .catch(function(err){
+            mostrarToast('&#10007; Falha ao enviar para o servidor: ' + err.message);
+          });
       }
       checkAlertas();
     } catch(err) {
@@ -4844,33 +4861,86 @@ window._gasQueue = window._gasQueue || [];
 
 // POST para o GAS sem preflight CORS
 // Usando text/plain evita o OPTIONS preflight que o GAS nao responde
-function gasPost(acao, dados) {
-  var gasUrl = localStorage.getItem('gasUrl');
-  if(!gasUrl) return Promise.resolve({ ok:false, erro:'GAS nao configurado' });
-  var payload = JSON.stringify(Object.assign({ acao: acao }, dados));
-  return fetch(gasUrl, {
-    method:   'POST',
-    redirect: 'follow',
-    // text/plain nao dispara preflight OPTIONS — o GAS aceita normalmente
-    headers:  { 'Content-Type': 'text/plain;charset=utf-8' },
-    body:     payload,
-  })
-  .then(function(r) { return r.text(); })
-  .then(function(txt) {
-    if(!txt || !txt.trim()) throw new Error('GAS retornou resposta vazia');
-    if(txt.trim()[0]==='<') throw new Error('GAS retornou HTML — verifique deploy: acesso = Qualquer pessoa');
-    return JSON.parse(txt);
+// ═══════════════════════════════════════════════════════
+//  COMUNICAÇÃO COM O GAS — via JSONP
+// ═══════════════════════════════════════════════════════
+// O Google Apps Script, quando o sistema é hospedado em outro domínio
+// (ex: GitHub Pages), às vezes não devolve o cabeçalho CORS necessário
+// para o navegador liberar a leitura da resposta de um fetch() comum —
+// isso acontece tanto em GET quanto em POST, mesmo com o GAS funcionando
+// perfeitamente do lado do servidor (o erro "Failed to fetch" / "blocked
+// by CORS policy" no console é exatamente esse sintoma).
+//
+// A solução usada aqui é JSONP: em vez de fetch(), criamos uma tag
+// <script src="..."> apontando para o GAS. Tags de script NÃO são
+// sujeitas à política de CORS do navegador — é a mesma técnica usada
+// para carregar bibliotecas de terceiros de qualquer domínio.
+function jsonpGas(acao, payload) {
+  return new Promise(function(resolve, reject) {
+    var gasUrl = localStorage.getItem('gasUrl');
+    if(!gasUrl) { resolve({ ok:false, erro:'GAS nao configurado' }); return; }
+
+    var dataStr = encodeURIComponent(JSON.stringify(payload || {}));
+    var cbName  = '_gasCb_' + Date.now() + '_' + Math.floor(Math.random()*1e6);
+    var url     = gasUrl + '?acao=' + encodeURIComponent(acao) + '&data=' + dataStr + '&callback=' + cbName;
+
+    // Payloads muito grandes (ex: importar_alunos com milhares de linhas)
+    // não cabem numa URL. Nesse caso, usamos POST com mode:'no-cors' —
+    // o navegador ENVIA a requisição normalmente e o GAS processa e grava
+    // os dados; só não conseguimos ler a resposta de volta (fica "opaca").
+    // Por isso quem chama uma ação assim deve confirmar o resultado depois
+    // via outra leitura (ex: recarregar a base).
+    if(url.length > 7000) {
+      fetch(gasUrl, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(Object.assign({ acao: acao }, payload)),
+      }).then(function() {
+        resolve({ ok:true, semConfirmacao:true });
+      }).catch(function(err) {
+        reject(err);
+      });
+      return;
+    }
+
+    var acabou = false;
+    var script = document.createElement('script');
+
+    var timeoutId = setTimeout(function() {
+      if(acabou) return;
+      acabou = true;
+      cleanup();
+      reject(new Error('Tempo esgotado ao contactar o GAS'));
+    }, 20000);
+
+    function cleanup() {
+      clearTimeout(timeoutId);
+      delete window[cbName];
+      if(script.parentNode) script.parentNode.removeChild(script);
+    }
+
+    window[cbName] = function(data) {
+      if(acabou) return;
+      acabou = true;
+      cleanup();
+      resolve(data);
+    };
+
+    script.onerror = function() {
+      if(acabou) return;
+      acabou = true;
+      cleanup();
+      reject(new Error('Falha ao contactar o GAS (verifique a URL e o deploy)'));
+    };
+
+    script.src = url;
+    document.body.appendChild(script);
   });
 }
 
-// gasGet: internamente usa POST (via gasPost) para evitar bloqueio de CORS
-// que pode ocorrer em requisições GET cross-origin (ex: site no GitHub Pages
-// chamando um Web App do Google Apps Script em domínio diferente).
-// Mantém a mesma assinatura de antes — quem chama gasGet(acao, params)
-// não precisa mudar nada.
-function gasGet(acao, params) {
-  return gasPost(acao, params || {});
-}
+function gasPost(acao, dados) { return jsonpGas(acao, dados || {}); }
+function gasGet(acao, params) { return jsonpGas(acao, params || {}); }
 
 // Drena a fila de acionamentos pendentes
 function drenaFila() {
