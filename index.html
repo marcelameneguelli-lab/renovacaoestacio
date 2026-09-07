@@ -384,6 +384,7 @@ window.addEventListener('unhandledrejection', function(e) {
     <a onclick="ir('alunos')">🎓 Alunos <span class="ndot" id="nd-alunos" style="display:none"></span><span class="atalho-badge">Alt+2</span></a>
     <a onclick="ir('envios')">📤 Central de Envios</a>
     <a onclick="ir('followup')">🔔 Follow-Up <span class="ndot" id="nd-fu"></span></a>
+    <a onclick="abrirRecados()">📌 Recados <span class="ndot" id="nd-recados" style="display:none"></span></a>
     <a onclick="ir('importar')">📥 Importar Base</a>
     <a onclick="ir('renovados')">✅ Hist&#xF3;rico</a>
     <a onclick="ir('produtividade')">👥 Produtividade</a>
@@ -494,6 +495,15 @@ window.addEventListener('unhandledrejection', function(e) {
     <div class="mh"><h2><i class="fa fa-users"></i> Atendentes Cadastrados</h2><button class="mfc" onclick="fcModal('m-atend')">&#xD7;</button></div>
     <div class="mb" id="m-atend-body" style="max-height:78vh;overflow-y:auto"></div>
     <div class="mf"><button class="btn bs" onclick="fcModal('m-atend')">Fechar</button></div>
+  </div>
+</div>
+
+<!-- MODAL RECADOS -->
+<div class="mo" id="m-recados" style="align-items:center">
+  <div class="md" style="max-width:600px">
+    <div class="mh"><h2>📌 Recados e Tarefas da Equipe</h2><button class="mfc" onclick="fcModal('m-recados')">&#xD7;</button></div>
+    <div class="mb" id="m-recados-body" style="max-height:78vh;overflow-y:auto"></div>
+    <div class="mf"><button class="btn bs" onclick="fcModal('m-recados')">Fechar</button></div>
   </div>
 </div>
 
@@ -714,32 +724,20 @@ function salvarDados() {
     localStorage.setItem('envios_v2', JSON.stringify(ENVIOS.slice(-100)));
   } catch(e) {}
 
-  // ── Alunos: cache compacto com campos essenciais ──────────────
-  // Salvar o suficiente para renderizar a lista sem precisar do GAS
+  // ── Alunos: cache com todos os campos do objeto ───────────────
+  // Antes usava uma lista manual de campos, que ficava desatualizada
+  // toda vez que um campo novo era adicionado (ex: 'bu'), fazendo esses
+  // campos sumirem depois de recarregar a página. Agora salva o objeto
+  // inteiro, só zerando o array de acionamentos (que não é usado daqui,
+  // fica só no array global ACIONAMENTOS).
   if(ALUNOS.length > 0) {
     try {
       var cache = ALUNOS.map(function(a) {
-        return {
-          id:a.id, nome:a.nome, matricula:a.matricula,
-          curso:a.curso, modalidade:a.modalidade, periodo:a.periodo,
-          telefone:a.telefone, celularOriginal:a.celularOriginal,
-          email:a.email, status:a.status, condicao:a.condicao,
-          divTotal:a.divTotal, tipoInad:a.tipoInad, risco:a.risco,
-          propensao:a.propensao, safra:a.safra, faixaDivida:a.faixaDivida,
-          faixaAprov:a.faixaAprov, formando:a.formando,
-          situacaoPeriodo:a.situacaoPeriodo, criticidadeFin:a.criticidadeFin,
-          faltaCursar:a.faltaCursar, cobDesconto:a.cobDesconto,
-          cobAptoDesconto:a.cobAptoDesconto, cobCampanha:a.cobCampanha,
-          vaValor:a.vaValor, valorBrutoRen:a.valorBrutoRen,
-          bolVencto:a.bolVencto, nomStatusBoleto:a.nomStatusBoleto,
-          cpfDigitado:a.cpfDigitado||'', elegivelEstagio:a.elegivelEstagio||'',
-          pastaVermelha:a.pastaVermelha||false, semInad:a.semInad||0,
-          acionamentos:[]
-        };
+        return Object.assign({}, a, { acionamentos: [] });
       });
       localStorage.setItem('alunos_cache', JSON.stringify(cache));
     } catch(e) {
-      // Quota excedida: salvar só status
+      // Quota excedida: salvar só os campos essenciais
       try {
         var mini = ALUNOS.map(function(a){
           return { id:a.id, nome:a.nome, status:a.status,
@@ -755,6 +753,27 @@ function salvarDados() {
 // ═══════════════════════════════════════════
 //  TEMPLATES DE MENSAGEM
 // ═══════════════════════════════════════════
+
+// Calcula quantos meses se passaram desde que o aluno foi marcado como
+// Renovado (usa o acionamento mais recente com stAl='Renovado').
+// Usado para variar a mensagem de pós-venda conforme o tempo passa.
+function mesesDesdeRenovacao(a) {
+  try {
+    var acs = ACIONAMENTOS.filter(function(x){ return String(x.alunoId) === String(a.id) && x.stAl === 'Renovado'; })
+      .sort(function(x,y){ return (y._ts||0) - (x._ts||0); });
+    if(!acs.length) return 0;
+    var dataStr = acs[0].data;
+    if(!dataStr) return 0;
+    var p = String(dataStr).split('/');
+    if(p.length !== 3) return 0;
+    var dataRen = new Date(parseInt(p[2]), parseInt(p[1])-1, parseInt(p[0]));
+    if(isNaN(dataRen.getTime())) return 0;
+    var agora = new Date();
+    var meses = (agora.getFullYear()-dataRen.getFullYear())*12 + (agora.getMonth()-dataRen.getMonth());
+    return Math.max(0, meses);
+  } catch(e) { return 0; }
+}
+
 const TEMPLATES = {
   wpp: [
     { id:'wpp1', nome:'Renovação — Boleto Pendente', tag:'Boleto', fn: a => `Olá, ${pNome(a.nome)}! :)
@@ -782,13 +801,36 @@ Você está na reta final do curso de *${a.curso}*! Que conquista incrível!
 Mas sua matrícula para o semestre de conclusão ainda está em aberto. Não deixe nada atrasar sua formatura! 🎓
 
 O prazo é *${S.prazo}*. Me chama aqui que eu te ajudo a finalizar agora mesmo! ->` },
-    { id:'wpp4', nome:'Pós-Renovação', tag:'Pós-Ren', fn: a => `*${pNome(a.nome)}, que notícia incrível!* :)
+    { id:'wpp4', nome:'Pós-Renovação (progressivo por mês)', tag:'Pós-Ren', fn: a => {
+      const meses = mesesDesdeRenovacao(a);
+      if(meses <= 0) {
+        return `*${pNome(a.nome)}, que notícia incrível!* :)
 
 Sua matrícula foi renovada com sucesso! A Estácio está muito feliz em continuar essa jornada com você! ❤️
 
 Desejamos um semestre cheio de aprendizados, conexões e conquistas. Você está no caminho certo! ->
 
-Como foi o processo de renovação para você? Ficou com alguma dúvida? :)` },
+Como foi o processo de renovação para você? Ficou com alguma dúvida? :)`;
+      } else if(meses === 1) {
+        return `Olá, ${pNome(a.nome)}! :)
+
+Já faz 1 mês desde a sua renovação em *${a.curso}* — como está sendo essa nova etapa?
+
+📚 Uma dica importante: dá uma conferida na sua *grade de disciplinas* no portal do aluno pra confirmar se está tudo certo, e se precisar de algum ajuste é bom resolver logo.
+
+Qualquer dúvida, estou por aqui! :)`;
+      } else {
+        return `Olá, ${pNome(a.nome)}! :)
+
+Já se passaram *${meses} meses* desde a sua renovação em *${a.curso}*.
+
+&#9888; *Atenção*: a partir do 2º mês pode acontecer sobreposição entre a mensalidade do semestre anterior e a atual, caso ainda exista alguma pendência em aberto. Vale a pena conferir se está tudo em dia pra evitar cobrança duplicada.
+
+📚 Também recomendamos revisar sua *grade de disciplinas* no portal do aluno, pra garantir que está tudo certo e fazer os ajustes necessários, se precisar.
+
+Estou à disposição pra te ajudar com qualquer uma dessas questões! :)`;
+      }
+    } },
     { id:'wpp5', nome:'Lembrete Final — Prazo', tag:'Urgente', fn: a => `&#9888;️ *ATENÇÃO, ${pNome(a.nome)}!*
 
 Faltam poucos dias para o prazo de renovação da sua matrícula em *${a.curso}*!
@@ -1081,6 +1123,12 @@ function calcCurvaStats(periodoNome) {
     const renAtual = ultimo?.renAtual ?? 0;
     const pctAtual = ultimo ? Math.round((ultimo.pctAtual||0)*100) : 0;
     const metaPct  = ultimo ? Math.round((ultimo.metaPct||0)*100) : 0;
+    // Guard contra curva antiga salva no localStorage com dados corrompidos
+    // (de antes da validação de importação existir) — evita mostrar "73000%"
+    if(pctAtual > 300 || metaPct > 300 || pctAtual < 0 || metaPct < 0) {
+      console.warn('[CURVA] Dados de curva com percentual fora da faixa esperada — provavelmente uma importação antiga. Reimporte a curva.');
+      return null;
+    }
     return { ultimo, metaFech, metaDia, gapAtual, renAtual, pctAtual, metaPct,
              baseAtual: ultimo?.baseAtual??0, metaBase: rows[0]?.metaBase??0,
              rows };
@@ -1129,6 +1177,146 @@ function salvarMetasCategoria(campo, mapa) {
     gasPost('salvar_config', { chave: 'metas_'+campo, valor: JSON.stringify(mapa) })
       .catch(function(e){ console.warn('[METAS] Falha ao sincronizar metas_'+campo+':', e.message); });
   }
+}
+
+// ═══════════════════════════════════════════════════════
+//  RECADOS E TAREFAS DA EQUIPE
+// ═══════════════════════════════════════════════════════
+function getRecados() {
+  try { return JSON.parse(localStorage.getItem('recados')||'[]'); } catch(e) { return []; }
+}
+
+function salvarRecadosLocal(lista) {
+  localStorage.setItem('recados', JSON.stringify(lista));
+}
+
+function sincronizarRecados(lista) {
+  salvarRecadosLocal(lista);
+  var gasUrl = localStorage.getItem('gasUrl');
+  if(gasUrl) {
+    gasPost('salvar_config', { chave:'recados', valor: JSON.stringify(lista) })
+      .catch(function(e){ console.warn('[RECADOS] Falha ao sincronizar:', e.message); });
+  }
+}
+
+function carregarRecadosGAS() {
+  var gasUrl = localStorage.getItem('gasUrl');
+  if(!gasUrl) return;
+  gasGet('config').then(function(cfg) {
+    if(!cfg || !cfg.recados) return;
+    try {
+      var remoto = JSON.parse(cfg.recados);
+      var local  = getRecados();
+      // Mesclar por id — mantém a versão mais recente de cada recado
+      var mapa = {};
+      local.forEach(function(r){ mapa[r.id] = r; });
+      var mudou = local.length !== remoto.length;
+      remoto.forEach(function(r){
+        if(!mapa[r.id] || (r._ts||0) > (mapa[r.id]._ts||0)) { mapa[r.id] = r; mudou = true; }
+      });
+      if(mudou) {
+        var mesclado = Object.values(mapa).sort(function(a,b){ return (b._ts||0)-(a._ts||0); });
+        salvarRecadosLocal(mesclado);
+        atualizarBadgeRecados();
+        var m = document.getElementById('m-recados');
+        if(m && m.classList.contains('on')) renderRecados();
+      }
+    } catch(e) {}
+  }).catch(function(){});
+}
+
+function atualizarBadgeRecados() {
+  var lista = getRecados();
+  var meus = lista.filter(function(r){
+    return !r.concluido && (r.paraQuem === 'Todos' || normalizarNome(r.paraQuem) === normalizarNome(S.colab));
+  });
+  var badge = document.getElementById('nd-recados');
+  if(badge) badge.style.display = meus.length > 0 ? 'inline-block' : 'none';
+}
+
+function abrirRecados() {
+  renderRecados();
+  abModal('m-recados');
+}
+
+function renderRecados() {
+  var body = document.getElementById('m-recados-body');
+  if(!body) return;
+  var lista = getRecados().slice().sort(function(a,b){ return (b._ts||0)-(a._ts||0); });
+  var atendentes = getAtendentes().filter(function(a){ return a.ativo; });
+
+  body.innerHTML =
+    '<div style="padding:16px 18px;border-bottom:1px solid var(--cbr)">'
+    + '<div class="fg" style="margin-bottom:8px">'
+    + '<label>Recado ou tarefa</label>'
+    + '<textarea id="recado-texto" placeholder="Ex: Ligar para os alunos do curso X amanhã de manhã" style="width:100%;min-height:70px;border:1px solid var(--cbr);border-radius:7px;padding:8px 10px;font-size:13px"></textarea>'
+    + '</div>'
+    + '<div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">'
+    + '<div class="fg" style="flex:1;min-width:160px;margin-bottom:0">'
+    + '<label>Para quem</label>'
+    + '<select id="recado-para" style="width:100%">'
+    + '<option value="Todos">📢 Toda a equipe</option>'
+    + atendentes.map(function(a){ return '<option value="'+a.nome+'">'+a.nome+'</option>'; }).join('')
+    + '</select>'
+    + '</div>'
+    + '<button class="btn bv" onclick="adicionarRecado()">➕ Adicionar</button>'
+    + '</div></div>'
+    + '<div style="padding:14px 18px;display:flex;flex-direction:column;gap:8px">'
+    + (lista.length === 0
+        ? '<p style="color:var(--ct);font-size:13px;text-align:center;padding:20px">Nenhum recado no momento.</p>'
+        : lista.map(function(r){
+            return '<div style="display:flex;gap:10px;padding:10px 12px;border-radius:9px;background:'+(r.concluido?'var(--cb)':'var(--lab)')+';border:1px solid '+(r.concluido?'var(--cbr)':'#F0C060')+';opacity:'+(r.concluido?'.6':'1')+'">'
+              + '<div style="flex:1;min-width:0">'
+              + '<div style="font-size:13px;'+(r.concluido?'text-decoration:line-through':'')+'">'+r.texto+'</div>'
+              + '<div style="font-size:11px;color:var(--ct);margin-top:4px">'
+              + 'Para: <strong>'+r.paraQuem+'</strong> · De: '+r.criadoPor+' · '+r.criadoEm
+              + (r.concluido ? ' · &#10003; concluído por '+(r.concluidoPor||'') : '')
+              + '</div></div>'
+              + (!r.concluido ? '<button class="btn bv bpq" onclick="concluirRecado('+r.id+')" style="flex-shrink:0">&#10003; OK</button>' : '')
+              + '<button class="btn br2 bpq" onclick="removerRecado('+r.id+')" style="flex-shrink:0">🗑</button>'
+              + '</div>';
+          }).join(''))
+    + '</div>';
+}
+
+function adicionarRecado() {
+  var texto = (document.getElementById('recado-texto')?.value||'').trim();
+  var paraQuem = document.getElementById('recado-para')?.value || 'Todos';
+  if(!texto) { mostrarToast('&#9888;️ Escreva o recado antes de adicionar.'); return; }
+  var lista = getRecados();
+  var novo = {
+    id: Date.now(), texto: texto, paraQuem: paraQuem,
+    criadoPor: S.colab || 'Desconhecido',
+    criadoEm: new Date().toLocaleDateString('pt-BR'),
+    concluido: false, concluidoPor: '', concluidoEm: '',
+    _ts: Date.now(),
+  };
+  lista.unshift(novo);
+  sincronizarRecados(lista);
+  renderRecados();
+  atualizarBadgeRecados();
+  mostrarToast('&#10003; Recado adicionado!');
+}
+
+function concluirRecado(id) {
+  var lista = getRecados();
+  var r = lista.find(function(x){ return x.id === id; });
+  if(!r) return;
+  r.concluido = true;
+  r.concluidoPor = S.colab || '';
+  r.concluidoEm = new Date().toLocaleDateString('pt-BR');
+  r._ts = Date.now();
+  sincronizarRecados(lista);
+  renderRecados();
+  atualizarBadgeRecados();
+}
+
+function removerRecado(id) {
+  if(!confirm('Remover este recado?')) return;
+  var lista = getRecados().filter(function(x){ return x.id !== id; });
+  sincronizarRecados(lista);
+  renderRecados();
+  atualizarBadgeRecados();
 }
 
 function carregarMetasCategoriasGAS() {
@@ -1208,9 +1396,21 @@ function rDash() {
       .map(([nome, g]) => {
         const metaManual = parseInt(metasManuais[nome]);
         const temMetaManual = !isNaN(metaManual) && metaManual > 0;
-        const meta = temMetaManual ? metaManual : Math.round(S.metaFinal * (g.total / totalBase));
+
+        // Para BU: se existir curva importada (Digital/Presencial), usar a meta
+        // de fechamento dela automaticamente — é mais precisa que a estimativa
+        // proporcional, e vem da própria planilha de curva já importada.
+        let metaCurva = null;
+        if(campo === 'bu' && !temMetaManual) {
+          const nomeUp = nome.toUpperCase();
+          if(digOk && nomeUp.indexOf('DIGITAL') >= 0 || nomeUp === 'EAD') metaCurva = Math.round(cv.dig.metaFech);
+          else if(presOk && nomeUp.indexOf('PRESENCIAL') >= 0) metaCurva = Math.round(cv.pres.metaFech);
+        }
+
+        const temMetaCurva = metaCurva != null && metaCurva > 0;
+        const meta = temMetaManual ? metaManual : (temMetaCurva ? metaCurva : Math.round(S.metaFinal * (g.total / totalBase)));
         const pct = meta > 0 ? Math.round(g.renovados / meta * 100) : (g.renovados>0?100:0);
-        return { nome, total: g.total, renovados: g.renovados, meta, pct: Math.min(pct,999), temMetaManual };
+        return { nome, total: g.total, renovados: g.renovados, meta, pct: Math.min(pct,999), temMetaManual: temMetaManual || temMetaCurva, deCurva: temMetaCurva };
       })
       .filter(g => g.total > 0)
       .sort((a,b) => b.total - a.total);
@@ -1225,7 +1425,7 @@ function rDash() {
         <span style="font-size:11px;color:var(--ct)">${item.total} alunos</span>
       </div>
       <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
-        <span>${item.renovados} / <strong>${item.meta}</strong> meta${item.temMetaManual?'':' <span title="Meta estimada proporcionalmente — defina uma meta fixa em Configurações" style="color:var(--la)">~</span>'}</span>
+        <span>${item.renovados} / <strong>${item.meta}</strong> meta${item.deCurva?' <span title="Meta vinda da curva de renovação importada" style="color:var(--vd);font-size:10px">&#128200; curva</span>':(item.temMetaManual?'':' <span title="Meta estimada proporcionalmente — defina uma meta fixa em Configurações" style="color:var(--la)">~</span>')}</span>
         <span style="font-weight:700;color:${corBarra}">${item.pct}%</span>
       </div>
       <div class="prg" style="height:6px"><div class="pb" style="width:${pctBar}%;background:${corBarra}"></div></div>
@@ -2457,6 +2657,19 @@ function _parseXLSX(file, bu, statusEl) {
       }
       if(!rows.length) { if(statusEl) statusEl.innerHTML='<span style="color:var(--vm)">❌ Nenhuma linha de dados encontrada.</span>'; return; }
 
+      // Validação de sanidade: pctAtual/metaPct devem ser frações (0 a ~3).
+      // Se vier fora disso, a planilha tem colunas fora do esperado — melhor
+      // recusar a importação do que salvar números absurdos (ex: 73000%).
+      const pctForaDaFaixa = rows.some(r =>
+        (r.pctAtual != null && (r.pctAtual < 0 || r.pctAtual > 3)) ||
+        (r.metaPct  != null && (r.metaPct  < 0 || r.metaPct  > 3))
+      );
+      if(pctForaDaFaixa) {
+        if(statusEl) statusEl.innerHTML = '<span style="color:var(--vm)">❌ Planilha com colunas fora do esperado (percentuais absurdos). Confira o arquivo e tente novamente.</span>';
+        mostrarToast('&#10007; Curva rejeitada: valores de percentual fora da faixa esperada.');
+        return;
+      }
+
       // Sempre salva no período ativo
       let periodo = S.periodo || '2026.1';
 
@@ -2782,13 +2995,29 @@ function salvarAcionamento() {
 //  RENOVADOS / HISTÓRICO
 // ═══════════════════════════════════════════
 function rRenovados() {
-  const grupos={Renovado:ALUNOS.filter(a=>a.status==='Renovado'),'Em negociação':ALUNOS.filter(a=>a.status==='Em negociação'),Evadido:ALUNOS.filter(a=>a.status==='Evadido')};
+  // Mapear o timestamp do último acionamento de cada aluno, para ordenar
+  // do mais recente para o mais antigo (em vez da ordem de importação)
+  const ultimoTsPorAluno = {};
+  ACIONAMENTOS.forEach(ac => {
+    const ts = ac._ts || 0;
+    if(!ultimoTsPorAluno[ac.alunoId] || ts > ultimoTsPorAluno[ac.alunoId]) {
+      ultimoTsPorAluno[ac.alunoId] = ts;
+    }
+  });
+  function ordenarPorRecente(lista) {
+    return [...lista].sort((a,b) => (ultimoTsPorAluno[b.id]||0) - (ultimoTsPorAluno[a.id]||0));
+  }
+  const grupos={
+    Renovado: ordenarPorRecente(ALUNOS.filter(a=>a.status==='Renovado')),
+    'Em negociação': ordenarPorRecente(ALUNOS.filter(a=>a.status==='Em negociação')),
+    Evadido: ordenarPorRecente(ALUNOS.filter(a=>a.status==='Evadido')),
+  };
   const tabs=['Renovado','Em negociação','Evadido'];
   document.getElementById('tela-renovados').innerHTML=`
 <div class="tabs" id="tab-ren">${tabs.map((t,i)=>`<div class="tab ${i===0?'on':''}" onclick="tabG(this,'tg-${i}')">${t==='Renovado'?'&#10003;':t==='Em negociação'?'🤝':'&#x21A9;'} ${t} (${grupos[t].length})</div>`).join('')}</div>
 ${tabs.map((t,i)=>`<div class="tc ${i===0?'on':''}" id="tg-${i}">
 ${grupos[t].length===0?'<p style="color:var(--ct);padding:16px">Nenhum registro.</p>':`<div class="tw"><div style="overflow-x:auto"><table><thead><tr><th>Nome</th><th>Matrícula</th><th>Curso</th><th>Dívida</th><th>Último Acion.</th><th>Ação</th></tr></thead><tbody>
-${grupos[t].map(a=>{const ul=ACIONAMENTOS.filter(x=>x.alunoId===a.id).slice(-1)[0];return`<tr><td><strong>${a.nome}</strong></td><td><code>${a.matricula}</code></td><td style="font-size:12px">${a.curso}</td><td>R$ ${fmtVal(a.divTotal)}</td><td style="font-size:12px">${ul?ul.colab+' · '+ul.data:'—'}</td><td><button class="btn bp bpq" onclick="abrirAluno('${a.id}')">Ver</button></td></tr>`;}).join('')}
+${grupos[t].map(a=>{const acsAluno=ACIONAMENTOS.filter(x=>x.alunoId===a.id).sort((x,y)=>(y._ts||0)-(x._ts||0));const ul=acsAluno[0];return`<tr><td><strong>${a.nome}</strong></td><td><code>${a.matricula}</code></td><td style="font-size:12px">${a.curso}</td><td>R$ ${fmtVal(a.divTotal)}</td><td style="font-size:12px">${ul?ul.colab+' · '+ul.data:'—'}</td><td><button class="btn bp bpq" onclick="abrirAluno('${a.id}')">Ver</button></td></tr>`;}).join('')}
 </tbody></table></div></div>`}
 </div>`).join('')}`;
 }
@@ -3449,6 +3678,24 @@ function confirmarEnvio() {
   const colab  = document.getElementById('colab-envio')?.value || S.colab;
   const tpls   = TEMPLATES[canal]||[];
   const tpl    = tpls.find(t=>t.id===envioCtx.tpl);
+
+  // Confirmação de valor obrigatória para mensagens de cobrança/negociação —
+  // o consultor precisa checar se o valor citado na mensagem está correto
+  // ANTES de enviar, evitando cobrar valor desatualizado ou errado.
+  if(tpl && (tpl.tag === 'Boleto' || tpl.tag === 'Negociação')) {
+    const valorMensagem = fmtVal(a.vaValor || a.divMens || a.divTotal || 0);
+    const confirmado = confirm(
+      '&#9888; Confira antes de enviar:\n\n' +
+      'Aluno: ' + a.nome + '\n' +
+      'Valor citado na mensagem: R$ ' + valorMensagem + '\n\n' +
+      'Esse valor está correto e atualizado? Confirme apenas se já verificou.'
+    );
+    if(!confirmado) {
+      mostrarToast('Envio cancelado — confira o valor antes de reenviar.');
+      return;
+    }
+  }
+
   const destManual = document.getElementById('dest-manual')?.value || '';
   const gasUrl = localStorage.getItem('gasUrl');
 
@@ -3554,7 +3801,7 @@ function fcModal(id){
 // usado para pausar re-renderizações pesadas do sync a cada 15s enquanto
 // a pessoa está digitando/trabalhando dentro de um modal.
 function algumModalAberto(){
-  return ['m-aluno','m-envio','m-atend','m-admin'].some(function(id){
+  return ['m-aluno','m-envio','m-atend','m-admin','m-recados'].some(function(id){
     var el = document.getElementById(id);
     return el && el.classList.contains('on');
   });
@@ -3695,6 +3942,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   try { initAtalhos(); } catch(e){}
   try { atualizarContadorHoje(); } catch(e){}
   try { atualizarOnlineAgora(); } catch(e){}
+  try { atualizarBadgeRecados(); } catch(e){}
 
   // Atalho ESC
   document.addEventListener('keydown',e=>{if(e.key==='Escape'){document.querySelectorAll('.mo.on').forEach(m=>m.classList.remove('on'));var bg=document.getElementById('busca-global-wrap');if(bg)bg.classList.remove('on');}});
@@ -4643,6 +4891,7 @@ function carregarAcionamentosGAS() {
       }
       try { atualizarContadorHoje(); } catch(e) {}
       try { atualizarOnlineAgora(); } catch(e) {}
+      try { carregarRecadosGAS(); atualizarBadgeRecados(); } catch(e) {}
       S._tsSync = d.ts || Date.now();
     })
     .catch(function(err){ console.error('[GAS] carregarAcionamentosGAS:', err.message); });
@@ -4854,6 +5103,7 @@ function iniciarRealtime() {
         try { atualizarOnlineAgora(); } catch(ex) {}
         try { verificarMeta(); } catch(ex) {}
         try { carregarMetasCategoriasGAS(); } catch(ex) {}
+        try { carregarRecadosGAS(); } catch(ex) {}
 
         window._rtFails = 0;
         setOk('Ao vivo ' + new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}));
@@ -5893,9 +6143,9 @@ function renderHistoricoAluno(alunoId) {
   if(!acs.length) return '<div style="color:var(--ct);font-size:12px;padding:8px 0">Nenhum acionamento registrado ainda.</div>';
 
   return acs.map(function(ac) {
-    var icone = ac.tipo==='WhatsApp'?'??':ac.tipo==='Ligacao'||ac.tipo==='Ligança'?'??':ac.tipo==='E-mail'?'✉️️':ac.tipo==='SMS'?'??':'??';
+    var icone = ac.tipo==='WhatsApp'?'\uD83D\uDCAC':(ac.tipo==='Ligacao'||ac.tipo==='Ligação')?'\uD83D\uDCDE':ac.tipo==='E-mail'?'\u2709\uFE0F':ac.tipo==='SMS'?'\uD83D\uDCF1':'\uD83D\uDCC4';
     var stBg  = ac.stAl==='Renovado'?'var(--vdb)':ac.stAl==='Em negociação'?'var(--lab)':'var(--cbr)';
-    var fu = ac.fuData ? '<div style="font-size:10px;color:var(--la);margin-top:2px">?? Follow-up: '+ac.fuData+'</div>' : '';
+    var fu = ac.fuData ? '<div style="font-size:10px;color:var(--la);margin-top:2px">\uD83D\uDD14 Follow-up: '+ac.fuData+'</div>' : '';
     return '<div class="hist-item">'
       + '<div class="hist-ic">' + icone + '</div>'
       + '<div class="hist-txt">'
