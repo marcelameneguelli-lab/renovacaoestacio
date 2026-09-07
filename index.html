@@ -971,6 +971,17 @@ function ir(t) {
 //  ALERTAS
 // ═══════════════════════════════════════════
 // Normaliza fuData para DD/MM/YYYY (formato padrão do sistema)
+// Compara duas datas independente do formato em que cada uma chegou
+// (DD/MM/YYYY, YYYY-MM-DD, ISO completo com horário, ou objeto Date) —
+// usa normalizarFuData para colocar ambas no mesmo formato antes de comparar.
+// Sem isso, contadores de "hoje" (acionamentos, envios, renovações) ficavam
+// incompletos sempre que um registro de outro atendente chegava via GAS
+// com a data em formato diferente do gerado localmente.
+function dataIgual(dataCampo, dataComparar) {
+  if(!dataCampo || !dataComparar) return false;
+  return normalizarFuData(dataCampo) === normalizarFuData(dataComparar);
+}
+
 function normalizarFuData(fuData) {
   if(!fuData) return '';
 
@@ -1078,7 +1089,7 @@ function checkAlertas() {
 
   // Badge de acionamentos de hoje no topbar
   const hojeStr = new Date().toLocaleDateString('pt-BR');
-  const acsHoje = ACIONAMENTOS.filter(function(a){ return a.data === hojeStr; }).length;
+  const acsHoje = ACIONAMENTOS.filter(function(a){ return dataIgual(a.data, hojeStr); }).length;
   const ndHoje = document.getElementById('nd-hoje');
   const ndHojeBadge = document.getElementById('nd-hoje-badge');
   if(ndHoje) ndHoje.textContent = acsHoje;
@@ -1409,7 +1420,7 @@ function rDash() {
   ACIONAMENTOS.forEach(a=>{if(!colab[a.colab])colab[a.colab]={total:0,ren:0};colab[a.colab].total++;if(a.stAl==='Renovado')colab[a.colab].ren++;});
   const rk=Object.entries(colab).sort((a,b)=>b[1].ren-a[1].ren).slice(0,5);
   const mxRen=rk.length?rk[0][1].ren:1;
-  const enviosHoje=ENVIOS.filter(e=>e.data===new Date().toLocaleDateString('pt-BR')).length;
+  const enviosHoje=ENVIOS.filter(e=>dataIgual(e.data, new Date().toLocaleDateString('pt-BR'))).length;
 
   // Período único — sem tabs
 
@@ -1663,7 +1674,7 @@ ${_buildDashFu()}`;
     const cC=document.getElementById('ch-canais');
     if(cC){
       const hj=new Date().toLocaleDateString('pt-BR');
-      const eHj=ENVIOS.filter(e=>e.data===hj);
+      const eHj=ENVIOS.filter(e=>dataIgual(e.data, hj));
       if(CHARTS.c)CHARTS.c.destroy();
       CHARTS.c=new Chart(cC,{type:'bar',data:{labels:['WhatsApp','E-mail','SMS'],datasets:[{data:[eHj.filter(e=>e.canal==='wpp').length,eHj.filter(e=>e.canal==='email').length,eHj.filter(e=>e.canal==='sms').length],backgroundColor:['#25D366','#EA4335','#7B2FBE'],borderRadius:5}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{stepSize:1}}}}});
     }
@@ -2413,7 +2424,7 @@ function copiarTpl(tplId, alunoId) {
 // ═══════════════════════════════════════════
 function rEnvios() {
   const hojeStr = new Date().toLocaleDateString('pt-BR');
-  const hoje  = ENVIOS.filter(e=>e.data===hojeStr);
+  const hoje  = ENVIOS.filter(e=>dataIgual(e.data, hojeStr));
   const wpp   = ENVIOS.filter(e=>e.canal==='wpp').length;
   const email = ENVIOS.filter(e=>e.canal==='email').length;
   const sms   = ENVIOS.filter(e=>e.canal==='sms').length;
@@ -3637,7 +3648,7 @@ function calcRitmo() {
     : mediaDiariaReal >= metaNecDiaTotal * 0.7 ? 'alerta' : 'urgente';
 
   const hojeStr = hoje.toLocaleDateString('pt-BR');
-  const renHoje = ACIONAMENTOS.filter(a=>a.data===hojeStr && a.stAl==='Renovado').length;
+  const renHoje = ACIONAMENTOS.filter(a=>dataIgual(a.data, hojeStr) && a.stAl==='Renovado').length;
 
   return {
     renovados, falta, metaFinal: S.metaFinal, totalBase,
@@ -3858,7 +3869,7 @@ function algumModalAberto(){
     return el && el.classList.contains('on');
   });
 }
-function mostrarToast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('on');setTimeout(()=>t.classList.remove('on'),3500)}
+function mostrarToast(m){const t=document.getElementById('toast');t.innerHTML=m;t.classList.add('on');setTimeout(()=>t.classList.remove('on'),3500)}
 // salvarLogin handled inside fazerLogin block
 function salvarLogin_DISABLED(){
   // Stub mantido para compatibilidade — agora usa fazerLogin()
@@ -4477,8 +4488,10 @@ function renderAdmin() {
   const sizeEnvios  = JSON.stringify(ENVIOS).length;
   const toKB = n => (n/1024).toFixed(1)+'KB';
 
-  // Colabs únicos
+  // Colabs (para o histórico de quem já acionou) e atendentes cadastrados de verdade
   const colabs = [...new Set(ACIONAMENTOS.map(a=>a.colab).filter(Boolean))];
+  const atendentesCadastrados = getAtendentes();
+  const totalAtendentesAtivos = atendentesCadastrados.filter(a=>a.ativo).length;
 
   document.getElementById('m-admin-body').innerHTML=`
 <div style="padding:4px 2px">
@@ -4489,7 +4502,7 @@ function renderAdmin() {
       ${[['Alunos na base',totalAlunos,'var(--az)'],['Renovados',renovados,'var(--vd)'],
          ['Pendentes',pendentes,'var(--vm)'],['Negociando',negociando,'var(--la)'],
          ['Evadidos',evadidos,'#888'],['Acionamentos',totalAcions,'var(--az)'],
-         ['Envios',totalEnvios,'#7B2FBE'],['Atendentes',colabs.length,'var(--az)']].map(([l,v,c])=>
+         ['Envios',totalEnvios,'#7B2FBE'],['Atendentes ativos',totalAtendentesAtivos,'var(--az)']].map(([l,v,c])=>
         `<div style="background:var(--cb);border-radius:7px;padding:9px 11px">
           <div style="font-size:10px;color:var(--ct);text-transform:uppercase;letter-spacing:.4px">${l}</div>
           <div style="font-size:20px;font-weight:800;color:${c}">${v}</div>
@@ -6157,7 +6170,7 @@ function atualizarContadorHoje() {
   var hoje = new Date().toLocaleDateString('pt-BR');
   var colab = S.colab;
   var count = ACIONAMENTOS.filter(function(a){
-    return a.data === hoje && (!colab || a.colab === colab);
+    return dataIgual(a.data, hoje) && (!colab || a.colab === colab);
   }).length;
   var el = document.getElementById('sb-count-hoje');
   if(!el) return;
@@ -6167,7 +6180,7 @@ function atualizarContadorHoje() {
   // Badge na topbar
   var nd = document.getElementById('nd-hoje');
   var ndB = document.getElementById('nd-hoje-badge');
-  var totalHoje = ACIONAMENTOS.filter(function(a){ return a.data === hoje; }).length;
+  var totalHoje = ACIONAMENTOS.filter(function(a){ return dataIgual(a.data, hoje); }).length;
   if(nd) nd.textContent = totalHoje;
   if(ndB) ndB.style.display = totalHoje > 0 ? 'inline' : 'none';
 }
