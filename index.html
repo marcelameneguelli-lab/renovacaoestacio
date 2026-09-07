@@ -693,8 +693,12 @@ let ALUNOS = (function() {
         var corrompidos = amostra.filter(function(a){
           return !a || a.matricula === undefined || a.matricula === 'undefined' || a.curso === undefined;
         }).length;
-        if(corrompidos > amostra.length * 0.5) {
-          console.warn('[INIT] Cache de alunos corrompido detectado ('+corrompidos+'/'+amostra.length+' com campos undefined). Descartando e recarregando do servidor.');
+        // Também detecta cache salvo ANTES do campo 'bu' existir no objeto do
+        // aluno (versão antiga do código) — nesse caso a.bu é undefined em
+        // vez de string vazia, mesmo que o resto dos dados esteja íntegro.
+        var semBu = amostra.filter(function(a){ return a && a.bu === undefined; }).length;
+        if(corrompidos > amostra.length * 0.5 || semBu === amostra.length) {
+          console.warn('[INIT] Cache de alunos desatualizado detectado ('+corrompidos+' corrompidos, '+semBu+' sem campo bu). Descartando e recarregando do servidor.');
           localStorage.removeItem('alunos_cache');
           return [];
         }
@@ -1197,6 +1201,38 @@ function sincronizarRecados(lista) {
     gasPost('salvar_config', { chave:'recados', valor: JSON.stringify(lista) })
       .catch(function(e){ console.warn('[RECADOS] Falha ao sincronizar:', e.message); });
   }
+}
+
+function carregarCurvasGAS() {
+  var gasUrl = localStorage.getItem('gasUrl');
+  if(!gasUrl) return;
+  gasGet('config').then(function(cfg) {
+    if(!cfg) return;
+    var mudou = false;
+    Object.keys(cfg).forEach(function(chave) {
+      if(chave.indexOf('curva_') !== 0) return;
+      // chave no formato: curva_<periodo>_<BU>
+      var resto = chave.substring(6);
+      var partes = resto.split('_');
+      var bu = partes.pop();
+      var periodo = partes.join('_');
+      if(!periodo || !bu) return;
+      try {
+        var rows = JSON.parse(cfg[chave]);
+        var atual = JSON.stringify((S.curvas[periodo]||{})[bu] || null);
+        if(atual !== cfg[chave]) {
+          if(!S.curvas[periodo]) S.curvas[periodo] = {};
+          S.curvas[periodo][bu] = rows;
+          mudou = true;
+        }
+      } catch(e) {}
+    });
+    if(mudou) {
+      try { localStorage.setItem('curvas', JSON.stringify(S.curvas)); } catch(e) {}
+      if(window._telaAtiva === 'dash') { try { rDash(); } catch(e){} }
+      if(window._telaAtiva === 'importar') { try { rImportar(); } catch(e){} }
+    }
+  }).catch(function(){});
 }
 
 function carregarRecadosGAS() {
@@ -2657,17 +2693,18 @@ function _parseXLSX(file, bu, statusEl) {
       }
       if(!rows.length) { if(statusEl) statusEl.innerHTML='<span style="color:var(--vm)">❌ Nenhuma linha de dados encontrada.</span>'; return; }
 
-      // Validação de sanidade: pctAtual/metaPct devem ser frações (0 a ~3).
-      // Se vier fora disso, a planilha tem colunas fora do esperado — melhor
-      // recusar a importação do que salvar números absurdos (ex: 73000%).
+      // Aviso de sanidade: pctAtual/metaPct fora da faixa 0-3 pode indicar
+      // colunas diferentes do esperado. Avisa mas NÃO bloqueia a importação —
+      // o cálculo na tela (calcCurvaStats) já protege contra exibir números
+      // absurdos, então é melhor importar com aviso do que travar o usuário.
       const pctForaDaFaixa = rows.some(r =>
         (r.pctAtual != null && (r.pctAtual < 0 || r.pctAtual > 3)) ||
         (r.metaPct  != null && (r.metaPct  < 0 || r.metaPct  > 3))
       );
+      let avisoPct = '';
       if(pctForaDaFaixa) {
-        if(statusEl) statusEl.innerHTML = '<span style="color:var(--vm)">❌ Planilha com colunas fora do esperado (percentuais absurdos). Confira o arquivo e tente novamente.</span>';
-        mostrarToast('&#10007; Curva rejeitada: valores de percentual fora da faixa esperada.');
-        return;
+        avisoPct = '<div style="color:var(--la);font-size:11px;margin-top:4px">&#9888; Alguns percentuais desta planilha parecem fora do padrão esperado (0-100%). Confira os cards no Dashboard — se aparecerem estranhos, revise o arquivo.</div>';
+        console.warn('[CURVA] Percentuais fora da faixa 0-3 detectados na importação — dados importados mesmo assim, com aviso.');
       }
 
       // Sempre salva no período ativo
@@ -2677,12 +2714,19 @@ function _parseXLSX(file, bu, statusEl) {
       S.curvas[periodo][bu] = rows;
       try { localStorage.setItem('curvas', JSON.stringify(S.curvas)); } catch(e) { console.warn('Curvas: quota excedido, dados embutidos serão usados'); }
 
+      // Sincronizar com o GAS para os demais atendentes verem a mesma curva
+      var gasUrl = localStorage.getItem('gasUrl');
+      if(gasUrl) {
+        gasPost('salvar_config', { chave: 'curva_'+periodo+'_'+bu, valor: JSON.stringify(rows) })
+          .catch(function(e){ console.warn('[CURVA] Falha ao sincronizar com o GAS:', e.message); });
+      }
+
       const comDado = rows.filter(r=>r.renAtual!=null);
       const metaFech = rows[rows.length-1]?.metaRen;
       const ultimo   = comDado.length ? comDado[comDado.length-1] : null;
       const gapStr   = ultimo ? `Gap: ${ultimo.gap>=0?'+':''}${Math.round(ultimo.gap)}` : '';
 
-      if(statusEl) statusEl.innerHTML=`<span style="color:var(--vd)">&#10003; ${rows.length} dias carregados · Meta fechamento: ${Math.round(metaFech)} · ${gapStr}</span>`;
+      if(statusEl) statusEl.innerHTML=`<span style="color:var(--vd)">&#10003; ${rows.length} dias carregados · Meta fechamento: ${Math.round(metaFech)} · ${gapStr}</span>${avisoPct}`;
       mostrarToast(`&#10003; Curva ${bu} · ${periodo} importada! (${rows.length} dias)`);
       // Atualizar badge
       rImportar();
@@ -3989,14 +4033,19 @@ function calcProdData(filtroPer, filtroColab, filtroPerfil) {
     }
     acs = acs.filter(a => {
       if(!a.data) return false;
-      // Suporte a DD/MM/YYYY e YYYY-MM-DD — e blindado contra tipos não-string
-      // (o GAS pode devolver valores de data/hora tipados em vez de texto puro)
+      // Suporte a DD/MM/YYYY, YYYY-MM-DD e ISO completo (YYYY-MM-DDTHH:mm:ss...)
+      // — blindado contra tipos não-string e contra data já vir com horário
+      // (o Google Sheets às vezes tipifica a coluna Data como Date de verdade,
+      // que ao virar JSON chega como ISO completo, ex: "2026-09-07T00:00:00.000Z")
       const dataStr = String(a.data);
       let dt;
       if(dataStr.includes('/')) {
         const p = dataStr.split('/');
         // DD/MM/YYYY
         dt = new Date(p[2]+'-'+p[1].padStart(2,'0')+'-'+p[0].padStart(2,'0')+'T00:00:00');
+      } else if(dataStr.includes('T')) {
+        // Já é ISO completo — usar só a parte da data, sem concatenar de novo
+        dt = new Date(dataStr.substring(0,10)+'T00:00:00');
       } else {
         dt = new Date(dataStr+'T00:00:00');
       }
@@ -4892,6 +4941,8 @@ function carregarAcionamentosGAS() {
       try { atualizarContadorHoje(); } catch(e) {}
       try { atualizarOnlineAgora(); } catch(e) {}
       try { carregarRecadosGAS(); atualizarBadgeRecados(); } catch(e) {}
+      try { carregarCurvasGAS(); } catch(e) {}
+      try { carregarAtendentesGAS(); } catch(e) {}
       S._tsSync = d.ts || Date.now();
     })
     .catch(function(err){ console.error('[GAS] carregarAcionamentosGAS:', err.message); });
@@ -5104,6 +5155,8 @@ function iniciarRealtime() {
         try { verificarMeta(); } catch(ex) {}
         try { carregarMetasCategoriasGAS(); } catch(ex) {}
         try { carregarRecadosGAS(); } catch(ex) {}
+        try { carregarCurvasGAS(); } catch(ex) {}
+        try { carregarAtendentesGAS(); } catch(ex) {}
 
         window._rtFails = 0;
         setOk('Ao vivo ' + new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}));
@@ -5329,6 +5382,32 @@ function pushAtendentesGAS(lista) {
   if(!gasUrl) return;
   gasPost('salvar_atendentes', { atendentes: lista })
     .catch(function(err){ console.warn('GAS atendentes:', err.message); });
+}
+
+// Puxa a lista de atendentes do GAS periodicamente — sem isso, quando alguém
+// cadastra/edita um atendente num navegador, os outros nunca ficavam sabendo
+// (só existia o push, nunca um pull automático).
+function carregarAtendentesGAS() {
+  var gasUrl = localStorage.getItem('gasUrl');
+  if(!gasUrl) return;
+  gasGet('carregar_atendentes').then(function(d) {
+    if(!d || !d.ok || !Array.isArray(d.atendentes)) return;
+    var remoto = JSON.stringify(d.atendentes);
+    var local  = localStorage.getItem('atendentes') || '[]';
+    if(remoto !== local) {
+      localStorage.setItem('atendentes', remoto);
+      // Recalcular numAtend a partir da lista atualizada
+      var contamMeta = d.atendentes.filter(function(a){ return a.ativo && a.contaMeta!==false; }).length;
+      if(contamMeta > 0) {
+        S.numAtend = contamMeta;
+        localStorage.setItem('numAtend', String(contamMeta));
+      }
+      var m = document.getElementById('m-atend');
+      if(m && m.classList.contains('on')) { try { renderAtendentes(); } catch(e){} }
+      if(window._telaAtiva === 'config') { try { rConfig(); } catch(e){} }
+      if(window._telaAtiva === 'dash')   { try { rDash(); } catch(e){} }
+    }
+  }).catch(function(){});
 }
 
 // Envio em massa — abre modal de confirmação e envia via wa.me em sequência
