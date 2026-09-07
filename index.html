@@ -2993,7 +2993,14 @@ function concluirFu(id) {
 // ═══════════════════════════════════════════
 function salvarAcionamento() {
   if(!alunoSel) return;
-  if(!validarStatusNegociacao()) return;
+  // Debounce: evita registrar o mesmo acionamento duas vezes se a pessoa
+  // clicar rápido demais (duplo clique) — foi a causa de cards duplicados
+  // aparecendo no Follow-Up.
+  if(window._salvandoAcionamento) return;
+  window._salvandoAcionamento = true;
+  setTimeout(function(){ window._salvandoAcionamento = false; }, 2000);
+
+  if(!validarStatusNegociacao()) { window._salvandoAcionamento = false; return; }
   const a=alunoSel;
   const colab=document.getElementById('colab-ac')?.value||S.colab||'Desconhecido';
   const tipo=document.getElementById('tipo-ac')?.value||'WhatsApp';
@@ -3005,6 +3012,7 @@ function salvarAcionamento() {
     const errEl=document.getElementById('obs-error');
     if(errEl) errEl.classList.add('show');
     mostrarToast('&#9888;️ Preencha a observação do atendimento antes de registrar.');
+    window._salvandoAcionamento = false;
     return;
   }
   if(obsEl) obsEl.classList.remove('obs-required');
@@ -4521,6 +4529,10 @@ function renderAdmin() {
         <button class="btn bp" onclick="recarregarBaseGAS()">📥 Forçar recarga da base de Alunos</button>
         <p style="font-size:11px;color:var(--ct);margin-top:6px;max-width:260px">Use se a Lista de Alunos estiver mostrando "undefined" ou dados incompletos — descarta o cache local de alunos e busca a base atualizada do servidor.</p>
       </div>
+      <div>
+        <button class="btn bp" onclick="removerDuplicatasGAS()">🧹 Remover acionamentos duplicados</button>
+        <p style="font-size:11px;color:var(--ct);margin-top:6px;max-width:260px">Use se o mesmo card de Follow-Up ou acionamento estiver aparecendo repetido (geralmente por clique duplo no botão Registrar).</p>
+      </div>
     </div>
   </div>
 
@@ -4556,6 +4568,25 @@ function renderAdmin() {
     <div id="rel-status" style="font-size:12px;margin-top:8px;min-height:16px"></div>
   </div>
 </div>`;
+}
+
+function removerDuplicatasGAS() {
+  var gasUrl = localStorage.getItem('gasUrl');
+  if(!gasUrl) { mostrarToast('&#9888;️ GAS não configurado.'); return; }
+  if(!confirm('Isso vai varrer os acionamentos no servidor e remover duplicatas exatas (mesmo aluno, colaborador, observação, follow-up e tipo), mantendo sempre o mais antigo.\n\nContinuar?')) return;
+
+  mostrarToast('Verificando duplicatas no servidor...');
+  gasPost('remover_duplicatas', {}).then(function(d) {
+    if(!d || !d.ok) { mostrarToast('&#10007; Erro ao remover duplicatas.'); return; }
+    if(d.removidos > 0) {
+      mostrarToast('&#10003; ' + d.removidos + ' duplicata(s) removida(s)! Sincronizando...');
+      forcarSincronizacaoTotal();
+    } else {
+      mostrarToast('&#10003; Nenhuma duplicata encontrada no servidor.');
+    }
+  }).catch(function(err) {
+    mostrarToast('&#10007; Erro: ' + err.message);
+  });
 }
 
 function forcarSincronizacaoTotal() {
