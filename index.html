@@ -4901,21 +4901,35 @@ function jsonpGas(acao, payload) {
     var url     = gasUrl + '?acao=' + encodeURIComponent(acao) + '&data=' + dataStr + '&callback=' + cbName;
 
     // Payloads muito grandes (ex: importar_alunos com milhares de linhas)
-    // não cabem numa URL. Nesse caso, usamos POST com mode:'no-cors' —
-    // o navegador ENVIA a requisição normalmente e o GAS processa e grava
-    // os dados; só não conseguimos ler a resposta de volta (fica "opaca").
-    // Por isso quem chama uma ação assim deve confirmar o resultado depois
-    // via outra leitura (ex: recarregar a base).
+    // não cabem numa URL. Nesse caso, usamos POST via fetch normal — agora
+    // que a permissão do GAS está correta ("Qualquer pessoa"), isso funciona
+    // e ainda conseguimos ler a resposta de confirmação. Se por algum motivo
+    // isso falhar, caímos para um POST "no-cors" (sem confirmação) como
+    // último recurso, para garantir que os dados pelo menos sejam enviados.
     if(url.length > 7000) {
+      var bodyStr = JSON.stringify(Object.assign({ acao: acao }, payload));
       fetch(gasUrl, {
         method: 'POST',
-        mode: 'no-cors',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(Object.assign({ acao: acao }, payload)),
-      }).then(function() {
-        resolve({ ok:true, semConfirmacao:true });
-      }).catch(function(err) {
-        reject(err);
+        body: bodyStr,
+      })
+      .then(function(r) { return r.text(); })
+      .then(function(txt) {
+        if(!txt || !txt.trim()) throw new Error('resposta vazia');
+        resolve(JSON.parse(txt));
+      })
+      .catch(function(errFetch) {
+        console.warn('[GAS] fetch normal falhou para payload grande, tentando no-cors (sem confirmação):', errFetch.message);
+        fetch(gasUrl, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: bodyStr,
+        }).then(function() {
+          resolve({ ok:true, semConfirmacao:true });
+        }).catch(function(err) {
+          reject(err);
+        });
       });
       return;
     }
