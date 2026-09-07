@@ -927,15 +927,36 @@ function ir(t) {
 // Normaliza fuData para DD/MM/YYYY (formato padrão do sistema)
 function normalizarFuData(fuData) {
   if(!fuData) return '';
+
+  // Caso venha como objeto Date de verdade (o Google Sheets tipifica
+  // células de data automaticamente quando lidas via GAS)
+  if(fuData instanceof Date && !isNaN(fuData.getTime())) {
+    var dd0 = String(fuData.getDate()).padStart(2,'0');
+    var mm0 = String(fuData.getMonth()+1).padStart(2,'0');
+    return dd0 + '/' + mm0 + '/' + fuData.getFullYear();
+  }
+
   var s = String(fuData).trim();
   if(!s) return '';
-  // Ja esta em DD/MM/YYYY
+
+  // Já está em DD/MM/YYYY
   if(/^\d{2}\/\d{2}\/\d{4}$/.test(s)) return s;
-  // YYYY-MM-DD -> DD/MM/YYYY
+
+  // YYYY-MM-DD ou YYYY-MM-DDTHH:mm:ss... (ISO) -> DD/MM/YYYY
   if(/^\d{4}-\d{2}-\d{2}/.test(s)) {
     var p = s.substring(0,10).split('-');
     return p[2]+'/'+p[1]+'/'+p[0];
   }
+
+  // Último recurso: formato tipo "Thu May 18 2026 00:00:00 GMT..." (Date.toString())
+  // ou qualquer outro texto que o parser nativo do JS reconheça como data válida
+  var tentativa = new Date(s);
+  if(!isNaN(tentativa.getTime())) {
+    var dd1 = String(tentativa.getDate()).padStart(2,'0');
+    var mm1 = String(tentativa.getMonth()+1).padStart(2,'0');
+    return dd1 + '/' + mm1 + '/' + tentativa.getFullYear();
+  }
+
   return s;
 }
 
@@ -1175,7 +1196,8 @@ function rDash() {
     // para a categoria, cai no cálculo proporcional como estimativa.
     const grupos = {};
     ALUNOS.forEach(a => {
-      const key = (a[campo] || '').trim() || 'Não informado';
+      const raw = a[campo];
+      const key = ((raw === null || raw === undefined) ? '' : String(raw).trim()) || 'Não informado';
       if(!grupos[key]) grupos[key] = { total: 0, renovados: 0 };
       grupos[key].total++;
       if(a.status === 'Renovado') grupos[key].renovados++;
@@ -1493,7 +1515,8 @@ function rAlunos() {
   function listaUnicaNormalizada(campo) {
     const vistos = {}; const resultado = [];
     ALUNOS.forEach(a => {
-      const v = (a[campo]||'').trim();
+      const raw = a[campo];
+      const v = (raw === null || raw === undefined) ? '' : String(raw).trim();
       if(!v) return;
       const chave = v.toUpperCase();
       if(!vistos[chave]) { vistos[chave] = true; resultado.push(v); }
@@ -1715,7 +1738,10 @@ function abrirAluno(id) {
   const tpCamp       = a.tpCampanha    || a.bolCampIngressso || '';
 
   function cobVal(v, label) {
-    const val = v && v.trim() && v !== '—' ? v : null;
+    // Converter para string antes de qualquer operação — campos vindos do GAS
+    // (Google Sheets) podem chegar como número, boolean ou Date, não só string
+    const vStr = (v === null || v === undefined) ? '' : String(v).trim();
+    const val = vStr && vStr !== '—' ? vStr : null;
     return `<div class="cob-item"><div class="lb">${label}</div><div class="vl ${val?'':'vazio'}">${val||'Não informado'}</div></div>`;
   }
 
@@ -3063,10 +3089,15 @@ function renderMetasCategorias() {
   const wrapBu  = document.getElementById('metas-bu-wrap');
   if(!wrapMod || !wrapBu) return;
 
+  function strCampo(a, campo) {
+    const raw = a[campo];
+    return (raw === null || raw === undefined) ? '' : String(raw).trim();
+  }
+
   function listaCategorias(campo) {
     const vistos = {}; const resultado = [];
     ALUNOS.forEach(a => {
-      const v = (a[campo]||'').trim() || 'Não informado';
+      const v = strCampo(a, campo) || 'Não informado';
       if(vistos[v.toUpperCase()]) return;
       vistos[v.toUpperCase()] = true;
       resultado.push(v);
@@ -3084,7 +3115,7 @@ function renderMetasCategorias() {
     wrap.innerHTML = categorias.map(cat => {
       const id = 'meta-'+campo+'-'+cat.replace(/[^a-zA-Z0-9]/g,'_');
       const valorAtual = metas[cat] || '';
-      const totalCat = ALUNOS.filter(a=>((a[campo]||'').trim()||'Não informado')===cat).length;
+      const totalCat = ALUNOS.filter(a=>(strCampo(a, campo)||'Não informado')===cat).length;
       return `<div style="display:flex;align-items:center;gap:8px">
         <span style="flex:1;font-size:13px;font-weight:600">${cat} <span style="color:var(--ct);font-weight:400;font-size:11px">(${totalCat} alunos)</span></span>
         <input type="number" min="0" id="${id}" data-campo="${campo}" data-categoria="${cat.replace(/"/g,'&quot;')}" value="${valorAtual}" placeholder="Auto" style="width:90px;border:1px solid var(--cbr);border-radius:6px;padding:6px 8px;font-size:13px">
@@ -3710,14 +3741,16 @@ function calcProdData(filtroPer, filtroColab, filtroPerfil) {
     }
     acs = acs.filter(a => {
       if(!a.data) return false;
-      // Suporte a DD/MM/YYYY e YYYY-MM-DD
+      // Suporte a DD/MM/YYYY e YYYY-MM-DD — e blindado contra tipos não-string
+      // (o GAS pode devolver valores de data/hora tipados em vez de texto puro)
+      const dataStr = String(a.data);
       let dt;
-      if(a.data.includes('/')) {
-        const p = a.data.split('/');
+      if(dataStr.includes('/')) {
+        const p = dataStr.split('/');
         // DD/MM/YYYY
         dt = new Date(p[2]+'-'+p[1].padStart(2,'0')+'-'+p[0].padStart(2,'0')+'T00:00:00');
       } else {
-        dt = new Date(a.data+'T00:00:00');
+        dt = new Date(dataStr+'T00:00:00');
       }
       return !isNaN(dt) && dt >= ini && dt <= hoje;
     });
@@ -3752,8 +3785,8 @@ function calcProdData(filtroPer, filtroColab, filtroPerfil) {
     else if(st === 'Trancamento')   mapa[c].trancamento++;
     else if(st === 'Evadido')       mapa[c].evadidos++;
     // Boleto enviado/pago — detectar pelo tipo de acionamento ou obs
-    const obs = (ac.obs||'').toLowerCase();
-    const tipo = (ac.tipo||'').toLowerCase();
+    const obs = String(ac.obs||'').toLowerCase();
+    const tipo = String(ac.tipo||'').toLowerCase();
     if(obs.includes('boleto') && obs.includes('envi')) mapa[c].boletoEnviado++;
     if(obs.includes('boleto') && (obs.includes('pago')||obs.includes('pag'))) mapa[c].boletoPago++;
     if(ac.data) mapa[c].datas.add(ac.data);
