@@ -1214,6 +1214,33 @@ function sincronizarRecados(lista) {
   }
 }
 
+// Puxa período/prazo/meta final/nº atendentes do GAS periodicamente.
+// Sem isso, cada navegador podia ficar com um período ativo diferente,
+// fazendo a curva importada por um admin "sumir" para quem estivesse
+// com outro período selecionado localmente.
+function carregarConfigGeralGAS() {
+  var gasUrl = localStorage.getItem('gasUrl');
+  if(!gasUrl) return;
+  gasGet('config').then(function(cfg) {
+    if(!cfg || !cfg.config_geral) return;
+    try {
+      var remoto = JSON.parse(cfg.config_geral);
+      var mudou = false;
+      if(remoto.periodo && remoto.periodo !== S.periodo) { S.periodo = remoto.periodo; localStorage.setItem('periodo', remoto.periodo); mudou = true; }
+      if(remoto.prazo && remoto.prazo !== S.prazo) { S.prazo = remoto.prazo; localStorage.setItem('prazo', remoto.prazo); mudou = true; }
+      if(remoto.metaFinal && remoto.metaFinal !== S.metaFinal) { S.metaFinal = remoto.metaFinal; localStorage.setItem('metaFinal', String(remoto.metaFinal)); mudou = true; }
+      if(mudou) {
+        S.metaDia = calcMetaDiaAuto();
+        localStorage.setItem('metaDia', String(S.metaDia));
+        var badge = document.getElementById('per-badge');
+        if(badge) badge.textContent = S.periodo + ' · Prazo: ' + S.prazo;
+        if(window._telaAtiva === 'dash')   { try { rDash(); } catch(e){} }
+        if(window._telaAtiva === 'config') { try { rConfig(); } catch(e){} }
+      }
+    } catch(e) {}
+  }).catch(function(){});
+}
+
 function carregarCurvasGAS() {
   var gasUrl = localStorage.getItem('gasUrl');
   if(!gasUrl) return;
@@ -3507,6 +3534,15 @@ function salvarConfigPeriodo() {
 
   document.getElementById('per-badge').textContent = periodo + ' · Prazo: ' + prazo;
 
+  // Sincronizar com o GAS — sem isso, cada navegador ficava com seu próprio
+  // período/meta local, causando divergências (ex: curva importada num
+  // período "sumindo" para quem está com outro período ativo)
+  var gasUrl = localStorage.getItem('gasUrl');
+  if(gasUrl) {
+    gasPost('salvar_config', { chave: 'config_geral', valor: JSON.stringify({ periodo, prazo, metaFinal, numAtend }) })
+      .catch(function(e){ console.warn('[CONFIG] Falha ao sincronizar periodo/meta:', e.message); });
+  }
+
   const ok = document.getElementById('cfg-ok');
   if(ok) { ok.style.display='block'; setTimeout(()=>ok.style.display='none',3000); }
   mostrarToast(`&#10003; Salvo! Meta dia automática: ${S.metaDia} renovações/atendente/dia`);
@@ -4813,7 +4849,7 @@ function recarregarBaseGAS() {
   window._recarregandoBase = true;
   mostrarToast('Buscando base do servidor...');
   ALUNOS.length = 0;
-  gasGet('carregar_alunos')
+  gasGet('carregar_alunos', {}, 60000)
     .then(function(d) {
       if(d.ok && d.alunos && d.alunos.length > 0) {
         d.alunos.forEach(function(a) {
@@ -4852,7 +4888,7 @@ function carregarHistoricoGAS() {
 
   if(ALUNOS.length === 0) {
     mostrarToast('Conectando ao servidor...');
-    gasGet('carregar_alunos')
+    gasGet('carregar_alunos', {}, 60000)
       .then(function(d) {
         console.log('[GAS] carregar_alunos resposta:', d);
         if(!d.ok) {
@@ -4985,6 +5021,7 @@ function carregarAcionamentosGAS() {
       try { atualizarContadorHoje(); } catch(e) {}
       try { atualizarOnlineAgora(); } catch(e) {}
       try { carregarRecadosGAS(); atualizarBadgeRecados(); } catch(e) {}
+      try { carregarConfigGeralGAS(); } catch(e) {}
       try { carregarCurvasGAS(); } catch(e) {}
       try { carregarAtendentesGAS(); } catch(e) {}
       S._tsSync = d.ts || Date.now();
@@ -5136,7 +5173,7 @@ function iniciarRealtime() {
             mostrarToast('📥 Base atualizada por outro atendente. Recarregando...');
             // Limpar base local e recarregar do GAS
             ALUNOS.length = 0;
-            gasGet('carregar_alunos')
+            gasGet('carregar_alunos', {}, 60000)
               .then(function(d2) {
                 if(d2.ok && d2.alunos && d2.alunos.length > 0) {
                   d2.alunos.forEach(function(a) {
@@ -5201,6 +5238,7 @@ function iniciarRealtime() {
         try { carregarRecadosGAS(); } catch(ex) {}
         try { carregarCurvasGAS(); } catch(ex) {}
         try { carregarAtendentesGAS(); } catch(ex) {}
+        try { carregarConfigGeralGAS(); } catch(ex) {}
 
         window._rtFails = 0;
         setOk('Ao vivo ' + new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}));
@@ -5271,7 +5309,8 @@ window._gasQueue = window._gasQueue || [];
 // <script src="..."> apontando para o GAS. Tags de script NÃO são
 // sujeitas à política de CORS do navegador — é a mesma técnica usada
 // para carregar bibliotecas de terceiros de qualquer domínio.
-function jsonpGas(acao, payload) {
+function jsonpGas(acao, payload, timeoutMs) {
+  timeoutMs = timeoutMs || 20000;
   return new Promise(function(resolve, reject) {
     var gasUrl = localStorage.getItem('gasUrl');
     if(!gasUrl) { resolve({ ok:false, erro:'GAS nao configurado' }); return; }
@@ -5322,7 +5361,7 @@ function jsonpGas(acao, payload) {
       acabou = true;
       cleanup();
       reject(new Error('Tempo esgotado ao contactar o GAS'));
-    }, 20000);
+    }, timeoutMs);
 
     function cleanup() {
       clearTimeout(timeoutId);
@@ -5350,7 +5389,7 @@ function jsonpGas(acao, payload) {
 }
 
 function gasPost(acao, dados) { return jsonpGas(acao, dados || {}); }
-function gasGet(acao, params) { return jsonpGas(acao, params || {}); }
+function gasGet(acao, params, timeoutMs) { return jsonpGas(acao, params || {}, timeoutMs); }
 
 // Drena a fila de acionamentos pendentes
 function drenaFila() {
