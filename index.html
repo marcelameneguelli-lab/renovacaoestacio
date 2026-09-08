@@ -2579,6 +2579,11 @@ function rImportar() {
         Arquivo: <strong>BASE_RENOVAVEL_PAR_VOLTA REDONDA.csv</strong><br>
         <span style="font-size:12px">Importe diariamente. O histórico de acionamentos é preservado automaticamente.</span>
       </p>
+      <div class="fg" style="max-width:280px;margin-bottom:12px">
+        <label>Esta base é do semestre</label>
+        <input type="text" id="import-periodo" value="${S.periodo}" placeholder="Ex: 2026.2" style="width:100%">
+        <small style="color:var(--ct);font-size:11px">Se for diferente do período ativo atual (${S.periodo}), o sistema muda para este ao importar.</small>
+      </div>
       <div class="imp-box" id="imp-box" onclick="document.getElementById('csv-input').click()"
            ondrop="dropCSV(event)" ondragover="event.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')">
         <div style="font-size:36px;margin-bottom:6px"></div>
@@ -2795,7 +2800,23 @@ function processCSV(file) {
   if(!file) return;
   const status = document.getElementById('imp-status');
   status.innerHTML='<p style="color:var(--azm)">⏳ Processando...</p>';
-  
+
+  // Semestre informado para esta base — se diferente do período ativo,
+  // atualiza o sistema (e sincroniza com o GAS para todos os atendentes)
+  const periodoInformado = (document.getElementById('import-periodo')?.value || '').trim();
+  if(periodoInformado && periodoInformado !== S.periodo) {
+    S.periodo = periodoInformado;
+    localStorage.setItem('periodo', periodoInformado);
+    const badge = document.getElementById('per-badge');
+    if(badge) badge.textContent = periodoInformado + ' · Prazo: ' + S.prazo;
+    var gasUrl = localStorage.getItem('gasUrl');
+    if(gasUrl) {
+      gasPost('salvar_config', { chave: 'config_geral', valor: JSON.stringify({ periodo: S.periodo, prazo: S.prazo, metaFinal: S.metaFinal, numAtend: S.numAtend }) })
+        .catch(function(e){ console.warn('[CONFIG] Falha ao sincronizar novo período:', e.message); });
+    }
+    mostrarToast('Período ativo alterado para ' + periodoInformado);
+  }
+
   const reader = new FileReader();
   reader.onload = function(e) {
     try {
