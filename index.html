@@ -2786,6 +2786,19 @@ function removerCurva(periodo) {
   localStorage.setItem('curvas', JSON.stringify(S.curvas));
   mostrarToast(`Curvas de ${periodo} removidas.`);
   rImportar();
+
+  // Remover também no servidor — sem isso, a próxima sincronização (a cada
+  // 15s) baixava a curva de novo do GAS e ela "voltava sozinha".
+  var gasUrl = localStorage.getItem('gasUrl');
+  if(gasUrl) {
+    gasPost('remover_config_prefixo', { prefixo: 'curva_'+periodo+'_' })
+      .then(function(d){
+        if(d && d.ok && d.removidos > 0) {
+          console.log('[CURVA] ' + d.removidos + ' curva(s) removida(s) do servidor.');
+        }
+      })
+      .catch(function(e){ console.warn('[CURVA] Falha ao remover do servidor:', e.message); });
+  }
 }
 
 
