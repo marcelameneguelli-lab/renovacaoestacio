@@ -3057,7 +3057,21 @@ ${total===0
 
 function concluirFu(id) {
   const f=ACIONAMENTOS.find(a=>a.id===id);
-  if(f){f.fuStatus='OK';salvarDados();rFollowup();checkAlertas();mostrarToast('Follow-up concluído!');}
+  if(!f) return;
+  f.fuStatus='OK';
+  salvarDados();
+  rFollowup();
+  checkAlertas();
+  mostrarToast('Follow-up concluído!');
+
+  // Sincronizar com o servidor — sem isso, a próxima sincronização (a cada
+  // 15s) via outro acionamento revertia o follow-up de volta para pendente,
+  // porque o servidor nunca ficava sabendo que foi concluído aqui.
+  var gasUrl = localStorage.getItem('gasUrl');
+  if(gasUrl) {
+    gasPost('concluir_followup', { followupId: id })
+      .catch(function(err){ console.warn('[FOLLOWUP] Falha ao sincronizar conclusão:', err.message); });
+  }
 }
 
 // ═══════════════════════════════════════════
