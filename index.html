@@ -1,16 +1,26 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
+<!-- ═══ PWA — permite instalar como app no celular/computador ═══ -->
+<meta name="theme-color" content="#0A3D8F">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Renovação">
+<meta name="mobile-web-app-capable" content="yes">
 <script>
 // Quando hospedado no SharePoint, a GAS URL precisa ser configurada manualmente
-// em Configura??es ? Google Apps Script (URL do Web App)
-// Tentar recuperar do localStorage se j? foi configurada antes
+// em Configurações → Google Apps Script (URL do Web App)
+// Tentar recuperar do localStorage se já foi configurada antes
 (function() {
   var gasUrl = localStorage.getItem('gasUrl');
   if (gasUrl) {
     console.log('[INIT] GAS URL carregada:', gasUrl);
   } else {
-    console.log('[INIT] GAS URL n?o configurada. V? em Configura??es para configurar.');
+    console.log('[INIT] GAS URL não configurada. Vá em Configurações para configurar.');
   }
 })();
 </script>
@@ -26,7 +36,7 @@
   script.src = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js';
   script.onerror = function() {
     console.warn('[Chart.js] CDN bloqueado ? gr?ficos desabilitados, restante do sistema funciona normalmente.');
-    // Stub m?nimo para n?o quebrar o c?digo que usa Chart
+    // Stub mínimo para não quebrar o código que usa Chart
     window.Chart = function(ctx, cfg) {
       this.destroy = function(){};
       this.update  = function(){};
@@ -947,9 +957,13 @@ function ir(t) {
                   stAl:ac.stAl||'', data:ac.data||'', hora:ac.hora||'', _ts:ac._ts||0,
                 });
                 mudou = true;
-              } else if(ac.fuStatus && existe.fuStatus !== ac.fuStatus) {
-                // Atualizar status do follow-up mesmo se acionamento já existe
-                existe.fuStatus = ac.fuStatus;
+              } else if(ac.fuStatus === 'OK' && existe.fuStatus !== 'OK') {
+                // Só aceita a mudança quando é um AVANÇO (Agendado → OK).
+                // Nunca reverte um "OK" local de volta para "Agendado" — isso
+                // acontecia quando o clique em OK ainda não tinha sido
+                // confirmado pelo servidor e uma sincronização rodava no meio
+                // do caminho, fazendo o follow-up "voltar" sozinho.
+                existe.fuStatus = 'OK';
                 mudou = true;
               }
             } catch(errItem) {
@@ -5196,8 +5210,11 @@ function iniciarRealtime() {
           var fuTodos = (d.followups.hoje||[]).concat(d.followups.atrasados||[]).concat(d.followups.proximos||[]);
           fuTodos.forEach(function(fu) {
             var ac = ACIONAMENTOS.find(function(a){ return String(a.id) === String(fu.id); });
-            if(ac && ac.fuStatus !== fu.fuStatus) {
-              ac.fuStatus = fu.fuStatus || 'Agendado';
+            // Só avança de Agendado → OK, nunca reverte um "OK" já concluído
+            // localmente de volta para Agendado (mesma proteção contra a
+            // condição de corrida do outro ponto de sincronização).
+            if(ac && fu.fuStatus === 'OK' && ac.fuStatus !== 'OK') {
+              ac.fuStatus = 'OK';
               mudou = true;
             }
           });
@@ -6434,6 +6451,14 @@ function exportarProdPDF() {
 }
 
 
+// ═══ PWA — registrar o Service Worker (permite instalar como app) ═══
+if('serviceWorker' in navigator) {
+  window.addEventListener('load', function() {
+    navigator.serviceWorker.register('sw.js')
+      .then(function(reg) { console.log('[PWA] Service Worker registrado:', reg.scope); })
+      .catch(function(err) { console.warn('[PWA] Falha ao registrar Service Worker:', err.message); });
+  });
+}
 </script>
 </body>
 </html>
