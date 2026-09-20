@@ -9,7 +9,7 @@
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="Renovação">
+<meta name="apple-mobile-web-app-title" content="RenovaVR">
 <meta name="mobile-web-app-capable" content="yes">
 <script>
 // Quando hospedado no SharePoint, a GAS URL precisa ser configurada manualmente
@@ -397,6 +397,7 @@ window.addEventListener('unhandledrejection', function(e) {
     <a onclick="abrirRecados()">📌 Recados <span class="ndot" id="nd-recados" style="display:none"></span></a>
     <a onclick="ir('importar')">📥 Importar Base</a>
     <a onclick="ir('renovados')">✅ Hist&#xF3;rico</a>
+    <a onclick="ir('relatorios')">📊 Relat&#xF3;rios</a>
     <a onclick="ir('produtividade')">👥 Produtividade</a>
     <a onclick="ir('config')" id="menu-config"><span class="ic"><i class="fa fa-cog"></i></span> Configura&#xE7;&#xF5;es</a>
     <a onclick="abrirAdmin()" id="menu-admin" style="display:none">🔐 Admin</a>
@@ -463,6 +464,7 @@ window.addEventListener('unhandledrejection', function(e) {
     <div id="tela-followup" style="display:none"></div>
     <div id="tela-importar" style="display:none"></div>
     <div id="tela-renovados" style="display:none"></div>
+    <div id="tela-relatorios" style="display:none"></div>
     <div id="tela-produtividade" style="display:none"></div>
     <div id="tela-config" style="display:none"></div>
   </div>
@@ -927,15 +929,15 @@ function fmtVal(v) { return Number(v||0).toLocaleString('pt-BR',{minimumFraction
 // ═══════════════════════════════════════════
 //  NAVEGAÇÃO
 // ═══════════════════════════════════════════
-const TELAS = ['dash','alunos','envios','followup','importar','renovados','produtividade','config'];
-const TITULOS = {dash:'Dashboard',alunos:'Lista de Alunos',envios:'Central de Envios',followup:'Follow-Up',importar:'Importar Base',renovados:'Historico',produtividade:'Produtividade',config:'Configuracoes'};
+const TELAS = ['dash','alunos','envios','followup','importar','renovados','relatorios','produtividade','config'];
+const TITULOS = {dash:'Dashboard',alunos:'Lista de Alunos',envios:'Central de Envios',followup:'Follow-Up',importar:'Importar Base',renovados:'Historico',relatorios:'Relatorios de Acionamentos',produtividade:'Produtividade',config:'Configuracoes'};
 function ir(t) {
   TELAS.forEach(x=>document.getElementById('tela-'+x).style.display='none');
   document.getElementById('tela-'+t).style.display='block';
   document.querySelectorAll('#sb nav a').forEach((el,i)=>{el.classList.remove('on');if(TELAS[i]===t)el.classList.add('on')});
   document.getElementById('ttl').textContent = TITULOS[t];
   window._telaAtiva = t;
-  const fn = {dash:rDash,alunos:rAlunos,envios:rEnvios,followup:rFollowup,importar:rImportar,renovados:rRenovados,produtividade:rProdutividade,config:rConfig}[t];
+  const fn = {dash:rDash,alunos:rAlunos,envios:rEnvios,followup:rFollowup,importar:rImportar,renovados:rRenovados,relatorios:rRelatorios,produtividade:rProdutividade,config:rConfig}[t];
   try { if(fn) fn(); } catch(e) { console.error('[ir] erro em r'+t+'():', e.message, e.stack); }
   try { checkAlertas(); } catch(e) { console.error('[ir] checkAlertas:', e); }
   // Ao abrir followup ou dash, forçar sync imediato para dados frescos
@@ -3181,6 +3183,152 @@ function tabG(el,id) {
 }
 
 // ═══════════════════════════════════════════
+//  RELATÓRIOS DE ACIONAMENTOS
+// ═══════════════════════════════════════════
+// Diferente do Histórico (que mostra só o último acionamento por aluno),
+// aqui cada LINHA é um acionamento individual — permite montar relatórios
+// específicos como "quem prometeu pagar", "quem avisou que vai trancar" etc,
+// filtrando por status marcado, atendente, período e texto na observação.
+function calcRelatorioData() {
+  const f = window._relFiltros || {};
+  let acs = [...ACIONAMENTOS];
+
+  if(f.status && f.status !== 'todos') {
+    acs = acs.filter(a => a.stAl === f.status);
+  }
+  if(f.colab && f.colab !== 'todos') {
+    acs = acs.filter(a => a.colab === f.colab);
+  }
+  if(f.dataIni) {
+    const ini = new Date(f.dataIni + 'T00:00:00');
+    acs = acs.filter(a => {
+      const d = parseDataBR(a.data);
+      return d && d >= ini;
+    });
+  }
+  if(f.dataFim) {
+    const fim = new Date(f.dataFim + 'T23:59:59');
+    acs = acs.filter(a => {
+      const d = parseDataBR(a.data);
+      return d && d <= fim;
+    });
+  }
+  if(f.busca && f.busca.trim()) {
+    const termo = f.busca.trim().toLowerCase();
+    acs = acs.filter(a => (a.obs||'').toLowerCase().includes(termo));
+  }
+
+  // Anexar dados do aluno (matrícula, curso) quando disponível localmente
+  acs = acs.map(a => {
+    const al = ALUNOS.find(x => x.id === a.alunoId);
+    return Object.assign({}, a, {
+      matricula: al ? al.matricula : '—',
+      curso: al ? al.curso : '—',
+    });
+  });
+
+  acs.sort((a,b) => (b._ts||0) - (a._ts||0));
+  return acs;
+}
+
+// Converte DD/MM/YYYY (ou variações já tratadas por dataIgual/normalizarFuData
+// em outras partes do sistema) para um objeto Date — usado só para filtrar
+// o relatório por período.
+function parseDataBR(dataStr) {
+  if(!dataStr) return null;
+  const norm = normalizarFuData(dataStr);
+  const p = String(norm).split('/');
+  if(p.length !== 3) return null;
+  const d = new Date(parseInt(p[2]), parseInt(p[1])-1, parseInt(p[0]));
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function rRelatorios() {
+  const colabs = [...new Set(ACIONAMENTOS.map(a=>a.colab).filter(Boolean))].sort();
+  const statusOpcoes = ['Renovado','Em negociação','Trancamento','Evadido','Pendente'];
+  const f = window._relFiltros || { status:'todos', colab:'todos', dataIni:'', dataFim:'', busca:'' };
+  const resultado = calcRelatorioData();
+
+  document.getElementById('tela-relatorios').innerHTML = `
+<div class="tw" style="padding:16px;margin-bottom:14px">
+  <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end">
+    <div class="fg" style="margin-bottom:0">
+      <label style="font-size:11px">Status marcado no acionamento</label>
+      <select onchange="window._relFiltros=Object.assign({},window._relFiltros,{status:this.value});rRelatorios()" style="min-width:180px">
+        <option value="todos">Todos os status</option>
+        ${statusOpcoes.map(s=>`<option value="${s}" ${f.status===s?'selected':''}>${s}</option>`).join('')}
+      </select>
+    </div>
+    <div class="fg" style="margin-bottom:0">
+      <label style="font-size:11px">Atendente</label>
+      <select onchange="window._relFiltros=Object.assign({},window._relFiltros,{colab:this.value});rRelatorios()" style="min-width:160px">
+        <option value="todos">Todos os atendentes</option>
+        ${colabs.map(c=>`<option value="${c}" ${f.colab===c?'selected':''}>${c}</option>`).join('')}
+      </select>
+    </div>
+    <div class="fg" style="margin-bottom:0">
+      <label style="font-size:11px">De</label>
+      <input type="date" value="${f.dataIni||''}" onchange="window._relFiltros=Object.assign({},window._relFiltros,{dataIni:this.value});rRelatorios()">
+    </div>
+    <div class="fg" style="margin-bottom:0">
+      <label style="font-size:11px">Até</label>
+      <input type="date" value="${f.dataFim||''}" onchange="window._relFiltros=Object.assign({},window._relFiltros,{dataFim:this.value});rRelatorios()">
+    </div>
+    <div class="fg" style="flex:1;min-width:220px;margin-bottom:0">
+      <label style="font-size:11px">Buscar na observação (ex: "promessa", "trancar", "pagamento")</label>
+      <input type="text" value="${f.busca||''}" placeholder="Digite um termo..." oninput="window._relFiltros=Object.assign({},window._relFiltros,{busca:this.value});rRelatorios()">
+    </div>
+    <button class="btn bs bpq" onclick="window._relFiltros={status:'todos',colab:'todos',dataIni:'',dataFim:'',busca:''};rRelatorios()">Limpar filtros</button>
+    <button class="btn bp bpq" onclick="exportRelatorio()">📥 Exportar CSV</button>
+  </div>
+</div>
+
+<div class="tw">
+  <div style="padding:12px 16px;border-bottom:1px solid var(--cbr);font-size:13px;color:var(--ct)">
+    <strong style="color:var(--tx)">${resultado.length}</strong> acionamento(s) encontrado(s)
+  </div>
+  ${resultado.length===0 ? '<p style="color:var(--ct);padding:16px">Nenhum acionamento corresponde aos filtros.</p>' : `
+  <div style="overflow-x:auto">
+    <table>
+      <thead><tr><th>Aluno</th><th>Matrícula</th><th>Atendente</th><th>Data</th><th>Tipo</th><th>Status marcado</th><th>Observação</th><th>Follow-up</th><th>Ação</th></tr></thead>
+      <tbody>
+        ${resultado.slice(0,300).map(a => `<tr>
+          <td><strong>${a.nomeAluno||'—'}</strong></td>
+          <td><code>${a.matricula}</code></td>
+          <td>${a.colab||'—'}</td>
+          <td style="font-size:12px">${a.data||'—'} ${a.hora||''}</td>
+          <td style="font-size:12px">${a.tipo||'—'}</td>
+          <td>${a.stAl?`<span class="badge ${a.stAl==='Renovado'?'bvd':a.stAl==='Em negociação'?'bla':a.stAl==='Trancamento'?'bcz':a.stAl==='Evadido'?'bvm':'baz'}" style="font-size:11px">${a.stAl}</span>`:'—'}</td>
+          <td style="font-size:12px;max-width:260px;white-space:normal">${(a.obs||'—').substring(0,140)}${(a.obs||'').length>140?'…':''}</td>
+          <td style="font-size:12px">${a.fuData?a.fuData+(a.fuPara?' · '+a.fuPara:''):'—'}</td>
+          <td><button class="btn bp bpq" onclick="abrirAluno('${a.alunoId}')">Ver</button></td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>
+  ${resultado.length>300?`<p style="padding:12px 16px;color:var(--ct);font-size:12px">Mostrando os 300 mais recentes na tela — exporte o CSV para ver todos os ${resultado.length}.</p>`:''}
+  `}
+</div>`;
+}
+
+function exportRelatorio() {
+  const resultado = calcRelatorioData();
+  if(resultado.length===0) { mostrarToast('⚠️ Nenhum acionamento para exportar com esses filtros.'); return; }
+  const hd = ['Aluno','Matrícula','Curso','Atendente','Data','Hora','Tipo','Status Marcado','Observação','Follow-up Data','Follow-up Para'];
+  const rows = resultado.map(a => [
+    a.nomeAluno||'', a.matricula||'', a.curso||'', a.colab||'', a.data||'', a.hora||'',
+    a.tipo||'', a.stAl||'', (a.obs||'').replace(/"/g,'""'), a.fuData||'', a.fuPara||'',
+  ].map(v=>`"${v}"`));
+  const csv = [hd.join(','),...rows.map(r=>r.join(','))].join('\n');
+  const blob = new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'});
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href=url; a.download=`relatorio_acionamentos_${new Date().toLocaleDateString('pt-BR').replace(/\//g,'-')}.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  mostrarToast(`📥 ${resultado.length} acionamento(s) exportado(s)!`);
+}
+
+// ═══════════════════════════════════════════
 //  CONFIGURAÇÕES
 // ═══════════════════════════════════════════
 function rConfig() {
@@ -4910,10 +5058,12 @@ function recarregarBaseGAS() {
   if(window._recarregandoBase) return;
   window._recarregandoBase = true;
   mostrarToast('Buscando base do servidor...');
-  ALUNOS.length = 0;
   gasGet('carregar_alunos', {}, 60000)
     .then(function(d) {
       if(d.ok && d.alunos && d.alunos.length > 0) {
+        // Só apaga a base antiga DEPOIS de confirmar que a nova chegou —
+        // nunca ficar com ALUNOS vazio se a busca falhar ou demorar.
+        var novaBase = [];
         d.alunos.forEach(function(a) {
           a.id = String(a.id); a.acionamentos = [];
           a.cpfDigitado = a.cpf||'';
@@ -4921,8 +5071,10 @@ function recarregarBaseGAS() {
           a.divTotal = parseFloat(a.divTotal)||0;
           a.formando = a.formando===true||a.formando==='S';
           a.faixaDivida = a.faixaDivida==='0'?'Sem divida':(a.faixaDivida||'');
-          ALUNOS.push(a);
+          novaBase.push(a);
         });
+        ALUNOS.length = 0;
+        novaBase.forEach(function(a){ ALUNOS.push(a); });
         try { sincronizarStatusAlunos(); } catch(e) {}
         salvarDados();
         mostrarToast('&#10003; Base carregada: ' + ALUNOS.length + ' alunos.');
@@ -4935,7 +5087,7 @@ function recarregarBaseGAS() {
       window._recarregandoBase = false;
     })
     .catch(function(err) {
-      mostrarToast('&#10007; Erro ao buscar base: ' + err.message);
+      mostrarToast('&#10007; Erro ao buscar base: ' + err.message + ' — a base local NÃO foi alterada.');
       window._recarregandoBase = false;
     });
 }
@@ -5236,11 +5388,16 @@ function iniciarRealtime() {
             window._recarregandoBase = true;
             console.log('[SYNC] Base desatualizada: local=' + totalLocal + ' servidor=' + totalServidor + '. Recarregando...');
             mostrarToast('📥 Base atualizada por outro atendente. Recarregando...');
-            // Limpar base local e recarregar do GAS
-            ALUNOS.length = 0;
+            // IMPORTANTE: NUNCA apagar ALUNOS antes de confirmar que a nova
+            // base chegou. Antes, "ALUNOS.length = 0" rodava aqui na hora,
+            // e se a busca falhasse, atrasasse ou a aba estivesse em segundo
+            // plano, a base ficava vazia para sempre — esse era o motivo da
+            // base "se perder" sozinha ao longo do dia. Agora só substituímos
+            // depois que a nova base chega com sucesso.
             gasGet('carregar_alunos', {}, 60000)
               .then(function(d2) {
                 if(d2.ok && d2.alunos && d2.alunos.length > 0) {
+                  var novaBase = [];
                   d2.alunos.forEach(function(a) {
                     a.id              = String(a.id);
                     a.acionamentos    = [];
@@ -5252,8 +5409,10 @@ function iniciarRealtime() {
                     if(window._statusPendente && window._statusPendente[a.id]) {
                       a.status = window._statusPendente[a.id];
                     }
-                    ALUNOS.push(a);
+                    novaBase.push(a);
                   });
+                  ALUNOS.length = 0;
+                  novaBase.forEach(function(a){ ALUNOS.push(a); });
                   window._statusPendente = {};
                   salvarDados();
                   mostrarToast('&#10003; Base atualizada: ' + ALUNOS.length + ' alunos.');
@@ -5263,10 +5422,15 @@ function iniciarRealtime() {
                       document.getElementById('nd-alunos').style.display = 'inline-block';
                     }
                   }
+                } else {
+                  console.warn('[SYNC] Recarga automática não retornou alunos — mantendo base local intacta.');
                 }
                 window._recarregandoBase = false;
               })
-              .catch(function() { window._recarregandoBase = false; });
+              .catch(function(err) {
+                console.warn('[SYNC] Falha na recarga automática, mantendo base local intacta:', err.message);
+                window._recarregandoBase = false;
+              });
           }
         }
 
