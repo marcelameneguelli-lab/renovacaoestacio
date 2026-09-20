@@ -3247,8 +3247,13 @@ function rRelatorios() {
   const colabs = [...new Set(ACIONAMENTOS.map(a=>a.colab).filter(Boolean))].sort();
   const statusOpcoes = ['Renovado','Em negociação','Trancamento','Evadido','Pendente'];
   const f = window._relFiltros || { status:'todos', colab:'todos', dataIni:'', dataFim:'', busca:'' };
-  const resultado = calcRelatorioData();
 
+  // A barra de filtros é montada só aqui (navegação, troca de select/data,
+  // limpar filtros). O campo de busca de texto tem seu PRÓPRIO handler que
+  // atualiza só a tabela de resultados (renderResultadosRelatorio), sem
+  // recriar este HTML — senão o campo perdia o foco a cada letra digitada,
+  // porque o innerHTML inteiro (incluindo o próprio input) era substituído
+  // a cada tecla.
   document.getElementById('tela-relatorios').innerHTML = `
 <div class="tw" style="padding:16px;margin-bottom:14px">
   <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end">
@@ -3276,14 +3281,24 @@ function rRelatorios() {
     </div>
     <div class="fg" style="flex:1;min-width:220px;margin-bottom:0">
       <label style="font-size:11px">Buscar na observação (ex: "promessa", "trancar", "pagamento")</label>
-      <input type="text" value="${f.busca||''}" placeholder="Digite um termo..." oninput="window._relFiltros=Object.assign({},window._relFiltros,{busca:this.value});rRelatorios()">
+      <input type="text" id="rel-busca-input" value="${f.busca||''}" placeholder="Digite um termo..." oninput="window._relFiltros=Object.assign({},window._relFiltros,{busca:this.value});renderResultadosRelatorio()">
     </div>
     <button class="btn bs bpq" onclick="window._relFiltros={status:'todos',colab:'todos',dataIni:'',dataFim:'',busca:''};rRelatorios()">Limpar filtros</button>
     <button class="btn bp bpq" onclick="exportRelatorio()">📥 Exportar CSV</button>
   </div>
 </div>
 
-<div class="tw">
+<div class="tw" id="rel-resultados"></div>`;
+
+  renderResultadosRelatorio();
+}
+
+function renderResultadosRelatorio() {
+  const resultado = calcRelatorioData();
+  const cont = document.getElementById('rel-resultados');
+  if(!cont) return;
+
+  cont.innerHTML = `
   <div style="padding:12px 16px;border-bottom:1px solid var(--cbr);font-size:13px;color:var(--ct)">
     <strong style="color:var(--tx)">${resultado.length}</strong> acionamento(s) encontrado(s)
   </div>
@@ -3307,8 +3322,7 @@ function rRelatorios() {
     </table>
   </div>
   ${resultado.length>300?`<p style="padding:12px 16px;color:var(--ct);font-size:12px">Mostrando os 300 mais recentes na tela — exporte o CSV para ver todos os ${resultado.length}.</p>`:''}
-  `}
-</div>`;
+  `}`;
 }
 
 function exportRelatorio() {
