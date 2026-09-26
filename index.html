@@ -1076,8 +1076,8 @@ window._fuAlertados = window._fuAlertados || new Set();
 
 function checkAlertas() {
   const hoje = new Date(); hoje.setHours(0,0,0,0);
-  const fuHoje  = ACIONAMENTOS.filter(a=>a.fuData && parseFuData(a.fuData) && parseFuData(a.fuData).getTime()===hoje.getTime() && a.fuStatus!=='OK');
-  const fuAtras = ACIONAMENTOS.filter(a=>a.fuData && parseFuData(a.fuData) && parseFuData(a.fuData)<hoje && a.fuStatus!=='OK');
+  const fuHoje  = ACIONAMENTOS.filter(a=>a.fuData && parseFuData(a.fuData) && parseFuData(a.fuData).getTime()===hoje.getTime() && !fuConcluido(a));
+  const fuAtras = ACIONAMENTOS.filter(a=>a.fuData && parseFuData(a.fuData) && parseFuData(a.fuData)<hoje && !fuConcluido(a));
   const tot = fuHoje.length + fuAtras.length;
 
   // Alerta sonoro: apenas para follow-ups ATRIBUÍDOS A MIM que ainda não foram alertados
@@ -1170,7 +1170,7 @@ function calcCurvaStats(periodoNome) {
 function _buildDashFu() {
   var _hoje = new Date(); _hoje.setHours(0,0,0,0);
   var _amanha = new Date(_hoje); _amanha.setDate(_hoje.getDate()+1);
-  var _fu = ACIONAMENTOS.filter(function(a){ return a.fuData && a.fuStatus!=='OK'; });
+  var _fu = ACIONAMENTOS.filter(function(a){ return a.fuData && !fuConcluido(a); });
   if(!_fu.length) return '';
 
   var _atras = _fu.filter(function(f){ return parseFuData(f.fuData) && parseFuData(f.fuData) < _hoje; });
@@ -1239,6 +1239,10 @@ function carregarConfigGeralGAS() {
   if(!gasUrl) return;
   gasGet('config').then(function(cfg) {
     if(cfg && cfg[histRenKey()] && mesclarHistRen(cfg[histRenKey()]) && window._telaAtiva === 'dash') { try { rDash(); } catch(e){} }
+    if(cfg && cfg.fu_concluidos && mesclarFuConcluidos(cfg.fu_concluidos)) {
+      try { checkAlertas(); } catch(e){}
+      if(window._telaAtiva === 'followup') { try { rFollowup(); } catch(e){} }
+    }
     if(!cfg || !cfg.config_geral) return;
     try {
       var remoto = JSON.parse(cfg.config_geral);
@@ -2253,7 +2257,7 @@ function abrirAluno(id) {
   ${acs.length?`<div style="border-top:1px solid var(--cbr);padding-top:10px;margin-top:4px">
     <p style="font-size:11px;font-weight:700;color:var(--ct);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">Histórico</p>
     ${acs.slice().reverse().slice(0,6).map(ac=>`
-      <div class="fui ${ac.fuData&&new Date(ac.fuData+'T00:00:00')<new Date()&&ac.fuStatus!=='OK'?'atras':''}" style="margin-bottom:6px">
+      <div class="fui ${ac.fuData&&new Date(ac.fuData+'T00:00:00')<new Date()&&!fuConcluido(ac)?'atras':''}" style="margin-bottom:6px">
         <div style="font-size:18px">${ac.tipo==='WhatsApp'?'💬':ac.tipo==='Ligação'?'📞':ac.tipo==='E-mail'?'✉️️':'🤝'}</div>
         <div style="flex:1">
           <strong>${ac.tipo}</strong> · <span style="font-size:11px;color:var(--ct)">${ac.data} · ${ac.colab}</span><br>
@@ -2996,7 +3000,7 @@ function rFollowup() {
   const filtroAtual = window._fuFiltro || 'todos'; // 'todos' | 'meus'
 
   // Follow-ups: todos os acionamentos com fuData pendente (de todos os atendentes)
-  let fu = ACIONAMENTOS.filter(a=>a.fuData && a.fuStatus!=='OK')
+  let fu = ACIONAMENTOS.filter(a=>a.fuData && !fuConcluido(a))
     .sort((a,b)=>(parseFuData(a.fuData)||0)-(parseFuData(b.fuData)||0));
 
   if(filtroAtual === 'meus' && S.colab) {
@@ -3033,7 +3037,7 @@ function rFollowup() {
       <div style="display:flex;gap:6px;margin-top:9px;flex-wrap:wrap">
         ${al?`<button class="btn bp bpq" onclick="abrirAluno('${idAttr}')">📞 Acionar</button>`:''}
         ${al?`<button class="btn bwa bpq" onclick="abrirEnvioRapido('${idAttr}','wpp')">WPP</button>`:''}
-        <button class="btn bv bpq" onclick="concluirFu(${f.id})">&#10003; OK</button>
+        <button class="btn bv bpq" onclick="concluirFu('${String(f.id).replace(/[^\w.-]/g,'')}')">&#10003; OK</button>
       </div>
     </div>`;
   }
@@ -3043,7 +3047,8 @@ function rFollowup() {
       <div style="display:flex;align-items:center;gap:7px;padding:10px 12px;border-radius:10px 10px 0 0;background:${cor};margin-bottom:2px">
         <span style="font-size:16px">${icone}</span>
         <strong style="font-size:13px">${titulo}</strong>
-        <span style="margin-left:auto;background:rgba(0,0,0,.12);color:#fff;border-radius:12px;padding:1px 8px;font-size:11px;font-weight:700">${lista.length}</span>
+        ${tipo==='atrasado' && lista.length ? `<button class="btn bs bpq" style="margin-left:auto;font-size:10px;padding:2px 8px" onclick="concluirFuLote('atrasado')">&#10003; Concluir todos</button>` : ''}
+        <span style="${tipo==='atrasado' && lista.length ? '' : 'margin-left:auto;'}background:rgba(0,0,0,.12);color:#fff;border-radius:12px;padding:1px 8px;font-size:11px;font-weight:700">${lista.length}</span>
       </div>
       <div style="background:var(--cb);border:1px solid var(--cbr);border-top:none;border-radius:0 0 10px 10px;padding:10px;min-height:80px">
         ${lista.length===0
@@ -3053,6 +3058,7 @@ function rFollowup() {
     </div>`;
   }
 
+  window._fuListas = { atrasado: atrasados, hoje: hoje_fu, proximo: proximos };
   const total = fu.length;
   document.getElementById('tela-followup').innerHTML = `
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
@@ -3074,23 +3080,90 @@ ${total===0
     </div>`}`;
 }
 
+// ── Follow-ups concluídos ──
+// Além de marcar fuStatus='OK', guardamos os IDs concluídos numa lista própria
+// (localStorage + GAS, chave fu_concluidos). Assim o follow-up some para todos
+// mesmo quando o servidor não acha o ID na aba Acionamentos (registros antigos,
+// ID gravado em outro formato etc.), e nenhuma sincronização traz ele de volta.
+function getFuConcluidos() {
+  if(!window._fuConcSet) {
+    var arr = [];
+    try { arr = JSON.parse(localStorage.getItem('fuConcluidos') || '[]') || []; } catch(e) {}
+    window._fuConcSet = new Set(arr.map(String));
+  }
+  return window._fuConcSet;
+}
+function salvarFuConcluidosLocal() {
+  try { localStorage.setItem('fuConcluidos', JSON.stringify(Array.from(getFuConcluidos()))); } catch(e) {}
+}
+function fuConcluido(ac) {
+  if(!ac) return true;
+  if(ac.fuStatus === 'OK' || ac.fuStatus === 'Concluído') return true;
+  return getFuConcluidos().has(String(ac.id));
+}
+function mesclarFuConcluidos(remotoTxt) {
+  try {
+    var remoto = JSON.parse(remotoTxt || '[]') || [];
+    var set = getFuConcluidos(), mudou = false;
+    remoto.forEach(function(id) { id = String(id); if(!set.has(id)) { set.add(id); mudou = true; } });
+    if(mudou) {
+      salvarFuConcluidosLocal();
+      ACIONAMENTOS.forEach(function(a) { if(set.has(String(a.id)) && a.fuStatus !== 'OK') a.fuStatus = 'OK'; });
+    }
+    return mudou;
+  } catch(e) { return false; }
+}
+function sincronizarFuConcluidosGAS() {
+  if(!localStorage.getItem('gasUrl')) return;
+  // Busca a lista atual do servidor, junta com a local e grava (evita apagar
+  // o que outro atendente concluiu ao mesmo tempo).
+  gasGet('config').then(function(cfg) {
+    if(cfg && cfg.fu_concluidos) mesclarFuConcluidos(cfg.fu_concluidos);
+  }).catch(function(){}).then(function() {
+    return gasPost('salvar_config', { chave: 'fu_concluidos', valor: JSON.stringify(Array.from(getFuConcluidos())) });
+  }).catch(function(err) { console.warn('[FOLLOWUP] Falha ao salvar lista de concluídos:', err && err.message); });
+}
+function marcarFuConcluido(id) {
+  var idStr = String(id);
+  var achou = false;
+  ACIONAMENTOS.forEach(function(a) {
+    if(String(a.id) === idStr) { a.fuStatus = 'OK'; achou = true; }
+  });
+  getFuConcluidos().add(idStr);
+  if(localStorage.getItem('gasUrl')) {
+    gasPost('concluir_followup', { followupId: idStr })
+      .then(function(d) { if(d && d.erro) console.warn('[FOLLOWUP] Servidor:', d.erro, '(fica concluído pela lista fu_concluidos)'); })
+      .catch(function(err){ console.warn('[FOLLOWUP] Falha ao sincronizar conclusão:', err.message); });
+  }
+  return achou;
+}
+
 function concluirFu(id) {
-  const f=ACIONAMENTOS.find(a=>a.id===id);
-  if(!f) return;
-  f.fuStatus='OK';
+  marcarFuConcluido(id);
+  salvarFuConcluidosLocal();
   salvarDados();
+  sincronizarFuConcluidosGAS();
   rFollowup();
   checkAlertas();
   mostrarToast('Follow-up concluído!');
+}
 
-  // Sincronizar com o servidor — sem isso, a próxima sincronização (a cada
-  // 15s) via outro acionamento revertia o follow-up de volta para pendente,
-  // porque o servidor nunca ficava sabendo que foi concluído aqui.
-  var gasUrl = localStorage.getItem('gasUrl');
-  if(gasUrl) {
-    gasPost('concluir_followup', { followupId: id })
-      .catch(function(err){ console.warn('[FOLLOWUP] Falha ao sincronizar conclusão:', err.message); });
-  }
+function concluirFuLote(tipo) {
+  var lista = (window._fuListas && window._fuListas[tipo]) || [];
+  if(!lista.length) return;
+  if(!confirm('Concluir ' + lista.length + ' follow-up(s) atrasado(s) da lista atual?')) return;
+  lista.forEach(function(f, i) {
+    // espaça os envios ao GAS para não sobrecarregar
+    setTimeout(function(){ marcarFuConcluido(f.id); }, i * 250);
+    getFuConcluidos().add(String(f.id));
+    f.fuStatus = 'OK';
+  });
+  salvarFuConcluidosLocal();
+  salvarDados();
+  sincronizarFuConcluidosGAS();
+  rFollowup();
+  checkAlertas();
+  mostrarToast(lista.length + ' follow-ups concluídos!');
 }
 
 // ═══════════════════════════════════════════
@@ -5423,7 +5496,7 @@ function iniciarRealtime() {
         // ── Follow-ups ────────────────────────────────────────────
         if(d.followups) {
           window._fuCache = d.followups;
-          var tot = (d.followups.hoje||[]).length + (d.followups.atrasados||[]).length;
+          var tot = (d.followups.hoje||[]).concat(d.followups.atrasados||[]).filter(function(x){ return !getFuConcluidos().has(String(x.id)); }).length;
           var nd = document.getElementById('nd-fu');
           if(nd) nd.style.display = tot > 0 ? 'inline-block' : 'none';
           // Sincronizar fuStatus dos follow-ups recebidos do servidor
