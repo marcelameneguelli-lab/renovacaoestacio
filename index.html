@@ -1238,6 +1238,7 @@ function carregarConfigGeralGAS() {
   var gasUrl = localStorage.getItem('gasUrl');
   if(!gasUrl) return;
   gasGet('config').then(function(cfg) {
+    if(cfg && cfg[histRenKey()] && mesclarHistRen(cfg[histRenKey()]) && window._telaAtiva === 'dash') { try { rDash(); } catch(e){} }
     if(!cfg || !cfg.config_geral) return;
     try {
       var remoto = JSON.parse(cfg.config_geral);
@@ -1434,6 +1435,8 @@ function carregarMetasCategoriasGAS() {
 }
 
 function rDash() {
+  sincronizarStatusAlunos();      // mesmo critério do gráfico: CSV "ALUNO RENOVADO" conta sempre
+  registrarSnapshotRenovados();   // alimenta o ritmo real diário
   // Período único ativo
   const perSel = S.periodo || '2026.1';
   const perObj = { nome: perSel, prazo: S.prazo, metaFinal: S.metaFinal, metaDia: S.metaDia };
@@ -3801,32 +3804,78 @@ function calcMetaDiaAuto() {
 
 // Recalcular status dos alunos a partir dos acionamentos (fonte mais atual)
 function sincronizarStatusAlunos() {
-  // Para cada aluno, pegar o ultimo stAl registrado nos acionamentos
-  var ultimoStatus = {};
+  // Status dos acionamentos só pode SUBIR o status do aluno (hierarquia).
+  // E o CSV é soberano: se a condição da base diz "ALUNO RENOVADO", o aluno é Renovado,
+  // mesmo que algum acionamento antigo tenha gravado outro status por cima.
+  var hierarquia = { 'Renovado': 4, 'Trancamento': 3, 'Em negociação': 2, 'Evadido': 1, 'Pendente': 0 };
+  var melhorPorAluno = {};
   ACIONAMENTOS.forEach(function(ac) {
     if(!ac.stAl || !ac.alunoId) return;
     var id = String(ac.alunoId);
-    var tsAc = ac._ts || 0;
-    if(!ultimoStatus[id] || tsAc > (ultimoStatus[id]._ts||0)) {
-      ultimoStatus[id] = { status: ac.stAl, _ts: tsAc };
-    }
+    var atual = melhorPorAluno[id] || 'Pendente';
+    if((hierarquia[ac.stAl]||0) > (hierarquia[atual]||0)) melhorPorAluno[id] = ac.stAl;
   });
-  // Aplicar nos alunos ? status de acionamento tem prioridade sobre status do CSV
-  // EXCETO: nunca reverter de Renovado para Pendente (proteger renova??es j? confirmadas)
-  var hierarquia = { 'Renovado': 4, 'Trancamento': 3, 'Em negocição': 2, 'Evadido': 1, 'Pendente': 0 };
   ALUNOS.forEach(function(a) {
-    // Pegar o MELHOR status de todos os acionamentos (hierarquia, não timestamp)
-    var idStr = String(a.id);
-    var melhorAc = 'Pendente';
-    ACIONAMENTOS.forEach(function(ac) {
-      if(String(ac.alunoId) !== idStr || !ac.stAl) return;
-      if((hierarquia[ac.stAl]||0) > (hierarquia[melhorAc]||0)) melhorAc = ac.stAl;
-    });
-    // Só atualizar se o acionamento tiver status mais alto que o CSV
-    if((hierarquia[melhorAc]||0) > (hierarquia[a.status]||0)) {
-      a.status = melhorAc;
-    }
+    var melhorAc = melhorPorAluno[String(a.id)] || 'Pendente';
+    if((hierarquia[melhorAc]||0) > (hierarquia[a.status]||0)) a.status = melhorAc;
+    if(csvRenovado(a) && a.status !== 'Renovado') a.status = 'Renovado';
   });
+}
+
+function csvRenovado(a) {
+  return String(a && a.condicao || '').toUpperCase().indexOf('RENOVADO') >= 0;
+}
+
+// ── Histórico diário de renovados da base (CSV) ──
+// Cada dia em que a base é vista, guarda quantos alunos estão "ALUNO RENOVADO".
+// A diferença entre os dias dá o ritmo REAL (inclui renovações que não passaram pelo CRM).
+// Fica no localStorage e é sincronizado pelo GAS (chave histren_<periodo>).
+function histRenKey() { return 'histren_' + (S.periodo || ''); }
+function getHistRen() {
+  try { return JSON.parse(localStorage.getItem(histRenKey()) || '{}') || {}; } catch(e) { return {}; }
+}
+function mesclarHistRen(remotoTxt) {
+  try {
+    var remoto = JSON.parse(remotoTxt || '{}') || {};
+    var local = getHistRen(), mudou = false;
+    Object.keys(remoto).forEach(function(d) {
+      if(local[d] == null || remoto[d] > local[d]) { local[d] = remoto[d]; mudou = true; }
+    });
+    if(mudou) localStorage.setItem(histRenKey(), JSON.stringify(local));
+    return mudou;
+  } catch(e) { return false; }
+}
+function registrarSnapshotRenovados() {
+  if(!ALUNOS.length) return;
+  var renCsv = ALUNOS.filter(csvRenovado).length;
+  var h = new Date();
+  var k = h.getFullYear() + '-' + String(h.getMonth()+1).padStart(2,'0') + '-' + String(h.getDate()).padStart(2,'0');
+  var hist = getHistRen();
+  if(hist[k] != null && hist[k] >= renCsv) return;
+  hist[k] = renCsv;
+  try { localStorage.setItem(histRenKey(), JSON.stringify(hist)); } catch(e) {}
+  if(localStorage.getItem('gasUrl')) {
+    gasPost('salvar_config', { chave: histRenKey(), valor: JSON.stringify(hist) }).catch(function(){});
+  }
+}
+function diasUteisEntre(isoA, isoB) {
+  var a = new Date(isoA + 'T00:00:00'), b = new Date(isoB + 'T00:00:00'), n = 0;
+  var c = new Date(a); c.setDate(c.getDate()+1);
+  while(c <= b) { if(c.getDay()!==0 && c.getDay()!==6) n++; c.setDate(c.getDate()+1); }
+  return Math.max(1, n);
+}
+function mediaDiariaPelaBase() {
+  var hist = getHistRen();
+  var dias = Object.keys(hist).sort();
+  if(dias.length < 2) return null;
+  var ult = dias.slice(-8); // até 7 intervalos
+  var totalRen = 0, totalDias = 0;
+  for(var i=1;i<ult.length;i++) {
+    var d = hist[ult[i]] - hist[ult[i-1]];
+    if(d < 0) continue; // base corrigida para baixo, ignora
+    totalRen += d; totalDias += diasUteisEntre(ult[i-1], ult[i]);
+  }
+  return totalDias ? Math.round(totalRen / totalDias * 10) / 10 : null;
 }
 
 function calcRitmo() {
@@ -3837,6 +3886,8 @@ function calcRitmo() {
 
   const renovados = ALUNOS.filter(a=>a.status==='Renovado').length;
   const totalBase = ALUNOS.length;
+  const naoRenovados = totalBase - renovados;
+  const pendentesBase = ALUNOS.filter(a=>a.status==='Pendente'||a.status==='Em negociação').length;
   const falta     = Math.max(0, S.metaFinal - renovados);
   const atend     = Math.max(1, S.numAtend);
 
@@ -3851,6 +3902,7 @@ function calcRitmo() {
   // ── Média real/dia — baseada na CURVA se disponível, senão nos acionamentos ──
   let mediaDiariaReal = 0;
   const cv = calcCurvaStats(S.periodo);
+  let fonteMedia = (cv.dig?.rows?.length||cv.pres?.rows?.length) ? 'curva' : 'acionamentos';
 
   if(cv.dig?.rows?.length || cv.pres?.rows?.length) {
     // Usar deltas diários da curva (renAtual) para calcular ritmo real
@@ -3876,6 +3928,9 @@ function calcRitmo() {
         ? Math.ceil(ultimos.reduce((s,v)=>s+v,0)/ultimos.length)
         : 0;
     }
+  } else if(mediaDiariaPelaBase() != null) {
+    mediaDiariaReal = mediaDiariaPelaBase();
+    fonteMedia = 'base CSV';
   } else {
     // Fallback: calcular pelo histórico de acionamentos
     const porData = {};
@@ -3897,8 +3952,8 @@ function calcRitmo() {
 
   // Projeção: usa o MAIOR entre ritmo real e meta necessária × equipe × dias
   // Isso mostra o que a equipe CONSEGUE entregar se mantiver o mínimo exigido
-  const capacidadeDia   = Math.max(mediaDiariaReal, metaNecDiaTotal);
-  const projecaoBruta   = Math.round(renovados + capacidadeDia * diasUteisRestantes);
+  // Projeção honesta: renovados + ritmo REAL × dias úteis restantes
+  const projecaoBruta   = Math.round(renovados + mediaDiariaReal * diasUteisRestantes);
   // Teto real: nunca pode passar do total de alunos da base (não dá pra renovar mais que existe)
   const projecao        = Math.min(totalBase, projecaoBruta);
   const gapProjecao     = projecao - S.metaFinal; // positivo = acima da meta, negativo = abaixo
@@ -3911,11 +3966,11 @@ function calcRitmo() {
   const renHoje = ACIONAMENTOS.filter(a=>dataIgual(a.data, hojeStr) && a.stAl==='Renovado').length;
 
   return {
-    renovados, falta, metaFinal: S.metaFinal, totalBase,
+    renovados, falta, metaFinal: S.metaFinal, totalBase, naoRenovados, pendentesBase,
     diasUteisRestantes, atend,
     mediaDiariaReal, metaNecDia, metaNecDiaTotal,
     projecao, gapProjecao, ritmoStatus, renHoje, prazo: S.prazo,
-    fonteMédia: (cv.dig?.rows?.length||cv.pres?.rows?.length) ? 'curva' : 'acionamentos'
+    fonteMédia: fonteMedia
   };
 }
 
@@ -5786,11 +5841,11 @@ function buildRitmoCard() {
   const bgBanner = rt.ritmoStatus==='ok'?'var(--vdb)':rt.ritmoStatus==='alerta'?'var(--lab)':'var(--vmb)';
   const sinal    = rt.gapProjecao>=0 ? '+' : '';
   const projCor  = rt.gapProjecao>=0 ? 'var(--vd)' : 'var(--vm)';
-  const projTxt  = rt.gapProjecao>=0 ? '? acima' : '&#x26A0;&#xFE0F; abaixo';
+  const projTxt  = rt.gapProjecao>=0 ? '&#10003; acima da meta' : '&#x26A0;&#xFE0F; abaixo da meta';
 
   let banner = '';
   if(rt.ritmoStatus==='ok') {
-    banner = '? <strong>Ritmo saud&aacute;vel!</strong> No ritmo atual (' + rt.mediaDiariaReal + '/dia via ' + rt.fonteMédia + '), a equipe est&aacute; projetada para atingir a meta.';
+    banner = '&#10003; <strong>Ritmo saud&aacute;vel!</strong> No ritmo atual (' + rt.mediaDiariaReal + '/dia via ' + rt.fonteMédia + '), a equipe est&aacute; projetada para atingir a meta.';
   } else if(rt.ritmoStatus==='alerta') {
     banner = '&#x26A0;&#xFE0F; <strong>Aten&ccedil;&atilde;o!</strong> Ritmo atual (' + rt.mediaDiariaReal + '/dia) est&aacute; abaixo do necess&aacute;rio (' + rt.metaNecDiaTotal + '/dia). Intensifique os acionamentos.';
   } else {
@@ -5811,14 +5866,14 @@ function buildRitmoCard() {
     + '<span style="font-size:11px;color:var(--ct)">base: ' + rt.totalBase + ' alunos &middot; fonte: ' + rt.fonteMédia + '</span>'
     + '</div>'
     + '<div class="dash-ritmo-grid">'
-    + drItem('vd',   'Renovados',        rt.renovados,       'var(--vd)', 'de ' + rt.metaFinal + ' total')
-    + drItem(rt.falta===0?'vd':rc, 'Falta renovar', rt.falta, cor, 'at&eacute; ' + rt.prazo)
+    + drItem('vd',   'Renovados',        rt.renovados,       'var(--vd)', 'meta ' + rt.metaFinal + ' &middot; base ' + rt.totalBase)
+    + drItem(rt.falta===0?'vd':rc, 'Falta p/ meta', rt.falta, cor, rt.naoRenovados + ' n&atilde;o renovados na base (' + rt.pendentesBase + ' pendentes)')
     + drItem('az',   'Dias &uacute;teis restantes', rt.diasUteisRestantes, 'var(--az)', 'at&eacute; o prazo')
     + drItem(rc,     'Meta dia/atend.',  rt.metaNecDia,      cor,         rt.atend + ' atendente(s)')
     + drItem(rc,     'Meta dia equipe',  rt.metaNecDiaTotal, cor,         'renova&ccedil;&otilde;es/dia &uacute;til')
     + drItem('az',   'M&eacute;dia real/dia', rt.mediaDiariaReal, 'var(--az)', 'via ' + rt.fonteMédia)
     + drItem(rt.gapProjecao>=0?'vd':rc, 'Proje&ccedil;&atilde;o final', rt.projecao, projCor, projTxt + ' (' + sinal + rt.gapProjecao + ')')
-    + drItem(rt.renHoje>0?'vd':'la', 'Renova&ccedil;&otilde;es hoje', rt.renHoje, rt.renHoje>0?'var(--vd)':'var(--la)', rt.renHoje===0?'&#x26A0;&#xFE0F; nenhuma ainda':'? andamento')
+    + drItem(rt.renHoje>0?'vd':'la', 'Renova&ccedil;&otilde;es hoje', rt.renHoje, rt.renHoje>0?'var(--vd)':'var(--la)', rt.renHoje===0?'&#x26A0;&#xFE0F; nenhuma ainda (CRM)':'&#10003; registradas no CRM')
     + '</div>'
     + '<div style="margin-top:10px;padding:9px 12px;border-radius:7px;font-size:13px;background:' + bgBanner + ';border:1px solid ' + cor + '">' + banner + '</div>'
     + '</div>';
