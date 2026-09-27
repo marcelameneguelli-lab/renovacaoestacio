@@ -873,11 +873,16 @@ function definirBaseCiclo(c, lista) {
 function aplicarBasesServidor(lista) {
   var novo = {};
   lista.forEach(function(a) {
-    var c = normCiclo(a.ciclo) || S.periodo;
+    var c = normCiclo(a.ciclo);
+    if(!/^\d{4}\.\d$/.test(c)) return; // linha antiga sem ciclo: ignora
     a.ciclo = c;
     (novo[c] = novo[c] || []).push(a);
   });
-  Object.keys(novo).forEach(function(c){ definirBaseCiclo(c, novo[c]); });
+  Object.keys(novo).forEach(function(c){
+    var local = BASES[c] ? BASES[c].length : 0;
+    if(local > 20 && novo[c].length < local * 0.5) return; // não encolhe base local por dado incompleto
+    definirBaseCiclo(c, novo[c]);
+  });
   if(novo[localStorage.getItem('bases_legado')]) localStorage.removeItem('bases_legado');
   if(!BASES[S.periodo]) definirBaseCiclo(S.periodo, []);
   ALUNOS = BASES[S.periodo];
@@ -2880,7 +2885,7 @@ function rImportar() {
   <div class="tw">
     <div class="th2">
       <strong>1️⃣ Base de Alunos — CSV diário</strong>
-      ${ALUNOS.length ? `<span class="badge bvd">${ALUNOS.length} alunos carregados · ${ultImp}</span>` : '<span class="badge bvm">Não importada</span>'}
+      ${ALUNOS.length ? `<span class="badge bvd" id="imp-badge">${ALUNOS.length} alunos · ciclo ${S.periodo} · ${ultImp}</span>` : '<span class="badge bvm">Não importada</span>'}
     </div>
     <div style="padding:18px">
       <p style="font-size:13px;color:var(--ct);margin-bottom:12px">
@@ -3198,6 +3203,7 @@ function processCSV(file) {
         }
       }
       definirBaseCiclo(cicloImp, novos);
+      try { const ib = document.getElementById('imp-badge'); if(ib) ib.textContent = novos.length + ' alunos · ciclo ' + cicloImp + ' · ' + new Date().toLocaleString('pt-BR'); } catch(e) {}
       if(cicloImp !== S.periodo) trocarCiclo(cicloImp, true);
       else { ALUNOS = novos; renderSeletorCiclo(); }
       salvarDados(); // salvar cache;
@@ -3212,6 +3218,7 @@ function processCSV(file) {
         <p style="color:var(--vd);font-weight:700;font-size:14px;margin-bottom:6px">&#10003; Importação concluída!</p>
         <p style="font-size:13px"><strong>Ciclo ${cicloImp} (${tipoCiclo(cicloImp)})</strong> · ${novos.length} alunos importados · Renovados: ${ren} · Pendentes: ${pen} · Negociando: ${neg}</p>
         <p style="font-size:12px;color:var(--ct)">Só a base deste ciclo foi substituída. Os outros ciclos continuam como estavam.</p>
+        <p id="imp-confirma" style="font-size:12px;font-weight:700;margin-top:4px">⏳ Enviando para o servidor...</p>
         <div style="margin-top:8px;display:flex;gap:7px">
           <button class="btn bp bpq" onclick="ir('alunos')">🎓 Ver Alunos</button>
           <button class="btn bs bpq" onclick="ir('dash')">Dashboard</button>
@@ -3228,27 +3235,35 @@ function processCSV(file) {
       const _gasUrl = localStorage.getItem('gasUrl');
       if(_gasUrl) {
         mostrarToast('Enviando base para o servidor (pode levar alguns segundos)...');
+        window._confirmarImport = function() {
+          gasGet('ping').then(function(pg) {
+            var n = pg && pg.totaisCiclo ? (parseInt(pg.totaisCiclo[cicloImp]) || 0) : null;
+            var el = document.getElementById('imp-confirma');
+            var ok = n === novos.length;
+            var txt = n === null
+              ? '&#9888;️ O servidor não informou os ciclos. Confira se o GAS v6 está publicado (?acao=ping deve mostrar versao 6.0).'
+              : ok ? '&#10003; Servidor confirmou ' + n + ' alunos no ciclo ' + cicloImp + '.'
+                   : '&#9888;️ Servidor tem ' + n + ' alunos no ciclo ' + cicloImp + ', esperado ' + novos.length + '. Importe de novo.';
+            if(el) el.innerHTML = txt;
+            mostrarToast(txt);
+          }).catch(function(){});
+        };
         gasPost('importar_alunos', { alunos: novos, ciclo: cicloImp })
           .then(function(d){
             if(d.ok && d.semConfirmacao) {
-              // Payload grande — foi enviado via POST sem leitura de resposta.
-              // Confirma silenciosamente lendo a base de volta do servidor.
-              setTimeout(function(){
-                gasGet('ping').then(function(p){
-                  if(p && p.totalAlunos > 0) {
-                    mostrarToast('&#10003; Base salva no servidor (' + p.totalAlunos + ' alunos)! Os demais atendentes verão ao abrir o sistema.');
-                  } else {
-                    mostrarToast('&#9888;️ Base enviada, mas não foi possível confirmar. Verifique em Admin.');
-                  }
-                }).catch(function(){});
-              }, 4000);
+              // Payload grande: enviado sem leitura de resposta. Confere no servidor.
+              setTimeout(window._confirmarImport, 10000);
             } else if(d.ok) {
-              mostrarToast('&#10003; Base salva no servidor! Os demais atendentes verão ao abrir o sistema.');
+              window._confirmarImport();
             } else {
+              var el = document.getElementById('imp-confirma');
+              if(el) el.innerHTML = '&#9888;️ Erro ao salvar no servidor: ' + (d.erro||'desconhecido');
               mostrarToast('&#9888;️ Erro ao salvar no servidor: ' + (d.erro||'desconhecido'));
             }
           })
           .catch(function(err){
+            var el = document.getElementById('imp-confirma');
+            if(el) el.innerHTML = '&#10007; Falha ao enviar para o servidor: ' + err.message;
             mostrarToast('&#10007; Falha ao enviar para o servidor: ' + err.message);
           });
       }
@@ -5852,7 +5867,17 @@ function iniciarRealtime() {
           if(d.totaisCiclo) {
             baseDiferente = Object.keys(d.totaisCiclo).some(function(c) {
               var n = parseInt(d.totaisCiclo[c]) || 0;
-              return n > 0 && (!BASES[c] || BASES[c].length !== n);
+              var local = BASES[c] ? BASES[c].length : 0;
+              if(n > 0 && local > 20 && n < local * 0.5) {
+                // Servidor com bem menos alunos que o navegador: importação incompleta
+                // no servidor. Não substitui a base local; avisa para reimportar.
+                if(!window._avisoBaseMenor || window._avisoBaseMenor !== c + n) {
+                  window._avisoBaseMenor = c + n;
+                  mostrarToast('&#9888;️ O servidor tem só ' + n + ' alunos no ciclo ' + c + ' (aqui são ' + local + '). Reimporte o CSV deste ciclo.');
+                }
+                return false;
+              }
+              return n > 0 && local !== n;
             });
           }
           if(baseDiferente && !window._recarregandoBase) {
