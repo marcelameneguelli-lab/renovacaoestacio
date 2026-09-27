@@ -501,6 +501,15 @@ window.addEventListener('unhandledrejection', function(e) {
 
 
 
+<!-- MODAL ENVIO EM LOTE -->
+<div class="mo" id="m-lote">
+  <div class="md" style="max-width:760px">
+    <div class="mh"><h2 id="m-lote-titulo">📣 Envio em lote</h2><button class="mfc" onclick="fecharEnvioLote()">&#xD7;</button></div>
+    <div class="mb" id="m-lote-body" style="max-height:78vh;overflow-y:auto"></div>
+    <div class="mf" id="m-lote-footer"></div>
+  </div>
+</div>
+
 <!-- MODAL ATENDENTES -->
 <div class="mo" id="m-atend" style="align-items:center">
   <div class="md" style="max-width:600px">
@@ -1858,6 +1867,7 @@ function rAlunos() {
       ✖ Limpar${filAtivos?' ('+filAtivos+')':''}
     </button>
     <button class="btn bs bpq" onclick="exportCSV()" style="white-space:nowrap">⬇ CSV</button>
+    <button class="btn bp bpq" onclick="abrirEnvioLote()" style="white-space:nowrap" title="Enviar mensagem para todos os alunos do filtro atual">📣 Envio em lote</button>
     <span style="font-size:12px;color:var(--ct);white-space:nowrap">${lista.length} alunos</span>
   </div>
 
@@ -4252,7 +4262,7 @@ function fcModal(id){
 // usado para pausar re-renderizações pesadas do sync a cada 15s enquanto
 // a pessoa está digitando/trabalhando dentro de um modal.
 function algumModalAberto(){
-  return ['m-aluno','m-envio','m-atend','m-admin','m-recados'].some(function(id){
+  return ['m-aluno','m-envio','m-atend','m-admin','m-recados','m-lote'].some(function(id){
     var el = document.getElementById(id);
     return el && el.classList.contains('on');
   });
@@ -5863,6 +5873,362 @@ function carregarAtendentesGAS() {
     }
   }).catch(function(){});
 }
+
+
+// ═══════════════════════════════════════════
+//  ENVIO EM LOTE (filtro atual da tela Alunos)
+//  WhatsApp: fila guiada, 1 clique por aluno (reaproveita a mesma aba do WhatsApp)
+//  E-mail: disparo automático pelo GAS, com intervalo entre envios
+// ═══════════════════════════════════════════
+var LOTE = null;
+var LOTE_VARS = [
+  ['{nome}','Primeiro nome'],['{nomecompleto}','Nome completo'],['{curso}','Curso'],
+  ['{matricula}','Matrícula'],['{prazo}','Prazo'],['{valor}','Valor a pagar'],['{divida}','Dívida total'],['{atendente}','Seu nome']
+];
+
+function loteTel(a) {
+  var d = String(a.celularOriginal || a.telefone || '').replace(/\D/g,'');
+  if(!d) return '';
+  if(d.length >= 12 && d.indexOf('55') === 0) return d;
+  return '55' + d;
+}
+function loteAplicar(txt, a) {
+  return String(txt || '')
+    .replace(/\{nome\}/gi, pNome(a.nome))
+    .replace(/\{nomecompleto\}/gi, a.nome || '')
+    .replace(/\{curso\}/gi, a.curso || '')
+    .replace(/\{matricula\}/gi, a.matricula || a.id || '')
+    .replace(/\{prazo\}/gi, S.prazo || '')
+    .replace(/\{valor\}/gi, fmtVal(a.vaValor || a.divMens))
+    .replace(/\{divida\}/gi, fmtVal(a.divTotal))
+    .replace(/\{atendente\}/gi, S.colab || '');
+}
+// Converte um modelo existente (função por aluno) em texto com variáveis editáveis
+function loteModeloParaTexto(fn) {
+  if(typeof fn !== 'function') return '';
+  var fake = { nome:'NOMEXYZ', curso:'{curso}', matricula:'{matricula}', id:'{matricula}',
+    vaValor:111111.11, divMens:111111.11, divTotal:222222.22, formando:false, status:'Pendente' };
+  var t = '';
+  try { t = fn(fake); } catch(e) { return ''; }
+  t = String(t)
+    .split(pNome('NOMEXYZ')).join('{nome}').split('NOMEXYZ').join('{nomecompleto}')
+    .split(fmtVal(111111.11)).join('{valor}').split(fmtVal(222222.22)).join('{divida}');
+  if(S.prazo) t = t.split(S.prazo).join('{prazo}');
+  var tmp = document.createElement('textarea');
+  tmp.innerHTML = t; // decodifica entidades HTML (&gt; &#9888; etc.)
+  return tmp.value;
+}
+function loteJaRecebeuHoje(a, canal) {
+  var hoje = new Date().toLocaleDateString('pt-BR');
+  return ENVIOS.some(function(e){ return String(e.alunoId) === String(a.id) && e.canal === canal && dataIgual(e.data, hoje); });
+}
+function loteListaFinal() {
+  var c = LOTE.canal;
+  var excluirRen = document.getElementById('lote-exc-ren')?.checked;
+  var pularHoje  = document.getElementById('lote-pular-hoje')?.checked;
+  var r = { validos: [], semContato: 0, renovados: 0, jaHoje: 0 };
+  LOTE.base.forEach(function(a) {
+    if(excluirRen && a.status === 'Renovado') { r.renovados++; return; }
+    var contato = c === 'wpp' ? loteTel(a) : String(a.email || '').trim();
+    if(!contato || (c === 'email' && contato.indexOf('@') < 0)) { r.semContato++; return; }
+    if(pularHoje && loteJaRecebeuHoje(a, c)) { r.jaHoje++; return; }
+    r.validos.push(a);
+  });
+  return r;
+}
+
+function abrirEnvioLote() {
+  if(!ALUNOS.length) { mostrarToast('&#9888;️ Nenhuma base carregada.'); return; }
+  var base = filtrar();
+  if(!base.length) { mostrarToast('&#9888;️ Nenhum aluno com os filtros atuais.'); return; }
+  LOTE = { base: base, canal: 'wpp', fila: [], idx: 0, ok: 0, erro: 0, pulados: 0, erros: [], rodando: false, parar: false };
+  renderLoteConfig();
+  abModal('m-lote');
+}
+function fecharEnvioLote() {
+  if(LOTE && LOTE.rodando && !confirm('O envio de e-mails está em andamento. Parar e fechar?')) return;
+  if(LOTE) LOTE.parar = true;
+  fcModal('m-lote');
+  try { if(window._telaAtiva === 'alunos') rAlunos(); } catch(e) {}
+}
+
+function renderLoteConfig() {
+  var c = LOTE.canal;
+  var tpls = TEMPLATES[c] || [];
+  var filAtivos = Object.keys(S.fil||{}).filter(function(k){ return S.fil[k] && S.fil[k] !== ''; })
+    .map(function(k){ return k + ': ' + S.fil[k]; });
+  document.getElementById('m-lote-titulo').textContent = '📣 Envio em lote · ' + LOTE.base.length + ' alunos no filtro';
+  document.getElementById('m-lote-body').innerHTML = `
+<div style="background:var(--cb);border-radius:8px;padding:9px 12px;font-size:12px;color:var(--ct);margin-bottom:12px">
+  <strong>Filtro atual:</strong> <span id="lote-filtro-txt"></span>
+</div>
+<div style="display:flex;gap:8px;margin-bottom:12px">
+  <button class="btn ${c==='wpp'?'bwa':'bs'}" onclick="loteTrocarCanal('wpp')">💬 WhatsApp (fila)</button>
+  <button class="btn ${c==='email'?'bem':'bs'}" onclick="loteTrocarCanal('email')">✉️ E-mail (Outlook institucional)</button>
+</div>
+<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;margin-bottom:12px">
+  <label><input type="checkbox" id="lote-exc-ren" checked onchange="loteAtualizarResumo()"> Excluir quem já renovou</label>
+  <label><input type="checkbox" id="lote-pular-hoje" checked onchange="loteAtualizarResumo()"> Pular quem já recebeu por este canal hoje</label>
+</div>
+<div class="fg">
+  <div class="lb" style="font-size:12px;font-weight:700;margin-bottom:4px">Modelo</div>
+  <select id="lote-tpl" onchange="loteCarregarModelo()" style="width:100%">
+    <option value="">Mensagem livre</option>
+    ${tpls.map(function(t){ return '<option value="'+t.id+'">'+t.nome+'</option>'; }).join('')}
+  </select>
+</div>
+${c==='email' ? `<div class="fg" style="margin-top:10px"><div class="lb" style="font-size:12px;font-weight:700;margin-bottom:4px">Assunto</div>
+  <input id="lote-assunto" style="width:100%" oninput="loteAtualizarPreview()" value="[Estácio] Renovação de Matrícula · Prazo {prazo}"></div>` : ''}
+<div class="fg" style="margin-top:10px">
+  <div class="lb" style="font-size:12px;font-weight:700;margin-bottom:4px">Mensagem (pode editar)</div>
+  <textarea id="lote-msg" rows="9" style="width:100%;font-family:inherit;font-size:13px" oninput="loteAtualizarPreview()"></textarea>
+  <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:6px">
+    ${LOTE_VARS.map(function(v){ return '<button class="btn bs bpq" style="font-size:10px;padding:2px 7px" title="'+v[1]+'" onclick="loteInserirVar(\''+v[0]+'\')">'+v[0]+'</button>'; }).join('')}
+  </div>
+</div>
+<div id="lote-resumo" style="margin-top:12px;font-size:12px"></div>
+<div style="margin-top:10px">
+  <div class="lb" style="font-size:12px;font-weight:700;margin-bottom:4px">Prévia (primeiro aluno da lista)</div>
+  <div id="lote-preview" style="white-space:pre-wrap;background:#F4F8F4;border:1px solid var(--cbr);border-radius:8px;padding:10px 12px;font-size:12px;max-height:200px;overflow-y:auto"></div>
+</div>`;
+  document.getElementById('lote-filtro-txt').textContent = filAtivos.length ? filAtivos.join(' · ') : 'nenhum (base inteira)';
+  document.getElementById('m-lote-footer').innerHTML = `
+<button class="btn bs" onclick="fecharEnvioLote()">Cancelar</button>
+<button class="btn ${c==='wpp'?'bwa':'bem'}" onclick="loteIniciar()">${c==='wpp'?'▶ Iniciar fila do WhatsApp':'⬇ Gerar planilha para mala direta'}</button>`;
+  var sel = document.getElementById('lote-tpl');
+  if(tpls.length && sel) { sel.value = tpls[0].id; loteCarregarModelo(); } else loteAtualizarResumo();
+}
+function loteTrocarCanal(c) {
+  var msgAtual = document.getElementById('lote-msg')?.value || '';
+  var tplAtual = document.getElementById('lote-tpl')?.value || '';
+  LOTE.canal = c;
+  renderLoteConfig();
+  // mantém o texto livre que a pessoa já tinha escrito
+  if(!tplAtual && msgAtual) {
+    document.getElementById('lote-tpl').value = '';
+    document.getElementById('lote-msg').value = msgAtual;
+    loteAtualizarResumo();
+  }
+}
+function loteCarregarModelo() {
+  var id = document.getElementById('lote-tpl').value;
+  var t = (TEMPLATES[LOTE.canal]||[]).find(function(x){ return x.id === id; });
+  document.getElementById('lote-msg').value = t ? loteModeloParaTexto(t.fn) : '';
+  if(t && LOTE.canal === 'email' && typeof t.assunto === 'function') {
+    var as = loteModeloParaTexto(t.assunto);
+    if(as) document.getElementById('lote-assunto').value = as;
+  }
+  loteAtualizarResumo();
+}
+function loteInserirVar(v) {
+  var ta = document.getElementById('lote-msg');
+  var i = ta.selectionStart != null ? ta.selectionStart : ta.value.length;
+  var j = ta.selectionEnd != null ? ta.selectionEnd : i;
+  ta.value = ta.value.slice(0,i) + v + ta.value.slice(j);
+  ta.focus(); ta.selectionStart = ta.selectionEnd = i + v.length;
+  loteAtualizarPreview();
+}
+function loteAtualizarResumo() {
+  var r = loteListaFinal();
+  LOTE._resumo = r;
+  var aviso = '';
+  if(LOTE.canal === 'email')
+    aviso = '<div style="color:var(--ct);margin-top:4px">O sistema gera uma planilha com a mensagem já personalizada de cada aluno. O envio sai do seu Outlook (e-mail institucional) pela mala direta do Word. O passo a passo aparece depois de gerar.</div>';
+  document.getElementById('lote-resumo').innerHTML =
+    '<strong style="color:var(--vd)">' + r.validos.length + ' vão receber</strong>'
+    + ' · ' + r.semContato + ' sem ' + (LOTE.canal==='wpp'?'celular':'e-mail')
+    + (r.renovados ? ' · ' + r.renovados + ' já renovados' : '')
+    + (r.jaHoje ? ' · ' + r.jaHoje + ' já receberam hoje' : '') + aviso;
+  loteAtualizarPreview();
+}
+function loteAtualizarPreview() {
+  var r = LOTE._resumo || loteListaFinal();
+  var el = document.getElementById('lote-preview');
+  if(!el) return;
+  if(!r.validos.length) { el.textContent = 'Nenhum aluno para receber.'; return; }
+  var a = r.validos[0];
+  var as = document.getElementById('lote-assunto');
+  el.textContent = (as ? 'Assunto: ' + loteAplicar(as.value, a) + '\n\n' : '') + loteAplicar(document.getElementById('lote-msg').value, a);
+}
+
+function loteRegistrar(a, canal, msg, tplNome) {
+  var ts = Date.now() * 10 + Math.floor(Math.random()*10);
+  var hoje = new Date().toLocaleDateString('pt-BR');
+  var hora = new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  var env = { id:ts, alunoId:a.id, canal:canal, tplNome:tplNome, colab:S.colab||'Envio em lote', msg:msg,
+    data:hoje, hora:hora, status:'enviado' };
+  ENVIOS.push(env); pushEnvioGAS(env);
+  var ac = { id:ts+1, alunoId:a.id, nomeAluno:a.nome||'', tipo: canal==='wpp'?'WhatsApp':'E-mail',
+    colab:S.colab||'Envio em lote', obs:'Envio em lote: '+tplNome, data:hoje, hora:hora,
+    fuData:'', fuTipo:'', fuStatus:'OK', stAl:a.status, _ts:Date.now() };
+  ACIONAMENTOS.push(ac); pushAcionamentoGAS(ac);
+}
+
+function loteIniciar() {
+  var msg = (document.getElementById('lote-msg').value || '').trim();
+  if(!msg) { mostrarToast('&#9888;️ Escreva a mensagem.'); return; }
+  var r = loteListaFinal();
+  if(!r.validos.length) { mostrarToast('&#9888;️ Nenhum aluno para receber.'); return; }
+  var selTpl = document.getElementById('lote-tpl');
+  LOTE.msg = msg;
+  LOTE.assunto = (document.getElementById('lote-assunto')?.value || '').trim() || '[Estácio] Renovação de Matrícula';
+  LOTE.tplNome = selTpl && selTpl.value ? selTpl.options[selTpl.selectedIndex].text : 'Mensagem livre';
+  LOTE.fila = r.validos; LOTE.idx = 0; LOTE.ok = 0; LOTE.erro = 0; LOTE.pulados = 0; LOTE.erros = [];
+  var pend = (LOTE.msg + ' ' + LOTE.assunto).match(/X{3,}|\[LINK[^\]]*\]|\[[A-ZÇÃÕÁÉÍÓÚ ]{6,}\]/g);
+  if(pend && !confirm('A mensagem ainda tem trechos para preencher:\n\n' + pend.join('\n') + '\n\nContinuar mesmo assim?')) return;
+  if(LOTE.canal === 'wpp') { renderLoteFila(); return; }
+  loteGerarMalaDireta();
+}
+
+// ── E-mail pelo Outlook institucional: planilha para mala direta do Word ──
+function loteCarregarXLSX(cb) {
+  if(window.XLSX) { cb(); return; }
+  var sc = document.createElement('script');
+  sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+  sc.onload = cb;
+  sc.onerror = function(){ mostrarToast('&#9888;️ Não foi possível carregar o gerador de planilha. Verifique a internet.'); };
+  document.head.appendChild(sc);
+}
+function loteGerarMalaDireta() {
+  loteCarregarXLSX(function() {
+    var linhas = LOTE.fila.map(function(a) {
+      return {
+        EMAIL: String(a.email||'').trim(),
+        NOME: a.nome || '',
+        PRIMEIRO_NOME: pNome(a.nome),
+        CURSO: a.curso || '',
+        MATRICULA: a.matricula || a.id || '',
+        ASSUNTO: loteAplicar(LOTE.assunto, a),
+        MENSAGEM: loteAplicar(LOTE.msg, a)
+      };
+    });
+    var ws = XLSX.utils.json_to_sheet(linhas);
+    ws['!cols'] = [{wch:32},{wch:34},{wch:14},{wch:28},{wch:14},{wch:50},{wch:80}];
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'MalaDireta');
+    var nomeArq = 'mala_direta_' + new Date().toLocaleDateString('pt-BR').replace(/\//g,'-') + '_' + linhas.length + 'alunos.xlsx';
+    XLSX.writeFile(wb, nomeArq);
+    LOTE.arquivo = nomeArq;
+    loteTelaInstrucoes();
+  });
+}
+function loteTelaInstrucoes() {
+  var assuntoFixo = LOTE.assunto.replace(/\{prazo\}/gi, S.prazo || '');
+  var temVarAssunto = /\{[a-z]+\}/i.test(assuntoFixo);
+  var body = document.getElementById('m-lote-body'), foot = document.getElementById('m-lote-footer');
+  body.innerHTML = '<div style="font-size:14px;font-weight:700;margin-bottom:6px">✅ Planilha gerada: <span id="lote-arq"></span></div>'
+    + '<div style="font-size:12px;color:var(--ct);margin-bottom:12px">' + LOTE.fila.length + ' alunos. Ela está na pasta Downloads.</div>'
+    + '<div style="font-size:13px;font-weight:700;margin-bottom:6px">Como enviar pelo seu Outlook (marques.marcela@estacio.br)</div>'
+    + '<ol style="font-size:12px;line-height:1.7;padding-left:18px;margin:0">'
+    + '<li>Abra o <strong>Word</strong> com um documento em branco.</li>'
+    + '<li>Aba <strong>Correspondências</strong> → <strong>Iniciar Mala Direta</strong> → <strong>Mensagens de Email</strong>.</li>'
+    + '<li><strong>Selecionar Destinatários</strong> → <strong>Usar uma Lista Existente</strong> → escolha a planilha baixada → aba <em>MalaDireta</em>.</li>'
+    + '<li><strong>Inserir Campo de Mesclagem</strong> → <strong>MENSAGEM</strong>. É só isso no documento, a mensagem já vem pronta para cada aluno.</li>'
+    + '<li>Clique em <strong>Visualizar Resultados</strong> e passe alguns alunos para conferir.</li>'
+    + '<li><strong>Concluir e Mesclar</strong> → <strong>Enviar Mensagens de Email</strong>. Em <em>Para</em> escolha <strong>EMAIL</strong>, em <em>Linha de assunto</em> cole o texto abaixo, formato <strong>HTML</strong>, e clique OK.</li>'
+    + '</ol>'
+    + '<div style="margin-top:10px;font-size:12px"><strong>Linha de assunto:</strong></div>'
+    + '<div style="display:flex;gap:6px;align-items:center;margin-top:4px"><input id="lote-assunto-fixo" readonly style="flex:1;font-size:12px"><button class="btn bs bpq" onclick="var i=document.getElementById(\'lote-assunto-fixo\');i.select();try{navigator.clipboard.writeText(i.value)}catch(e){document.execCommand(\'copy\')}mostrarToast(\'Assunto copiado\')">Copiar</button></div>'
+    + (temVarAssunto ? '<div style="font-size:11px;color:var(--la);margin-top:4px">&#9888;️ A mala direta do Word usa o mesmo assunto para todos. Troque as variáveis {…} do assunto por um texto fixo.</div>' : '')
+    + '<div style="margin-top:12px;font-size:11px;color:var(--ct);background:var(--cb);border-radius:6px;padding:8px 10px">Precisa do <strong>Outlook clássico</strong> instalado no Windows e aberto com a conta institucional. O "novo Outlook" e o Outlook na web não fazem mala direta. Os e-mails ficam na Caixa de Saída e saem aos poucos, pode deixar o Outlook aberto até terminar.</div>'
+    + '<div style="margin-top:12px;font-size:12px">Depois de enviar, clique em <strong>Registrar como enviados</strong> para gravar no histórico de envios e nos acionamentos.</div>';
+  document.getElementById('lote-arq').textContent = LOTE.arquivo;
+  document.getElementById('lote-assunto-fixo').value = assuntoFixo;
+  foot.innerHTML = '<button class="btn bs" onclick="fecharEnvioLote()">Fechar sem registrar</button>'
+    + '<button class="btn bs" onclick="loteGerarMalaDireta()">⬇ Baixar de novo</button>'
+    + '<button class="btn bv" onclick="loteRegistrarMalaDireta()">✅ Registrar como enviados</button>';
+}
+function loteRegistrarMalaDireta() {
+  if(!confirm('Registrar ' + LOTE.fila.length + ' e-mails como enviados?')) return;
+  LOTE.fila.forEach(function(a) { loteRegistrar(a, 'email', loteAplicar(LOTE.msg, a), LOTE.tplNome + ' (mala direta Outlook)'); });
+  salvarDados();
+  mostrarToast('✉️ ' + LOTE.fila.length + ' envios registrados');
+  fcModal('m-lote');
+  try { if(window._telaAtiva === 'alunos') rAlunos(); } catch(e) {}
+}
+
+// ── WhatsApp: fila guiada ──
+function renderLoteFila() {
+  var f = LOTE.fila, i = LOTE.idx;
+  var body = document.getElementById('m-lote-body'), foot = document.getElementById('m-lote-footer');
+  var pct = Math.round(i / f.length * 100);
+  var barra = '<div class="prg" style="height:8px;margin:8px 0 12px"><div class="pb" style="width:'+pct+'%;background:#25D366"></div></div>';
+  if(i >= f.length) {
+    salvarDados();
+    body.innerHTML = '<div style="text-align:center;padding:24px"><div style="font-size:30px">✅</div><div style="font-size:15px;font-weight:700;margin-top:6px">Fila concluída</div>'
+      + '<div style="font-size:13px;color:var(--ct);margin-top:6px">' + LOTE.ok + ' abertos no WhatsApp · ' + LOTE.pulados + ' pulados</div></div>';
+    foot.innerHTML = '<button class="btn bp" onclick="fecharEnvioLote()">Fechar</button>';
+    return;
+  }
+  var a = f[i];
+  body.innerHTML = '<div style="font-size:12px;color:var(--ct)">Aluno ' + (i+1) + ' de ' + f.length + ' · ' + LOTE.ok + ' enviados · ' + LOTE.pulados + ' pulados</div>' + barra
+    + '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px">'
+    + '<div><div style="font-weight:700;font-size:14px" id="lote-fila-nome"></div><div style="font-size:12px;color:var(--ct)" id="lote-fila-info"></div></div>'
+    + '<span class="badge bcz" style="font-size:11px" id="lote-fila-st"></span></div>'
+    + '<div id="lote-fila-msg" style="white-space:pre-wrap;background:#F4F8F4;border:1px solid var(--cbr);border-radius:8px;padding:10px 12px;font-size:12px;max-height:280px;overflow-y:auto"></div>'
+    + '<div style="font-size:11px;color:var(--ct);margin-top:8px">O WhatsApp abre sempre na mesma aba. Envie lá e volte aqui para o próximo.</div>';
+  document.getElementById('lote-fila-nome').textContent = a.nome;
+  document.getElementById('lote-fila-info').textContent = (a.curso||'') + ' · ' + loteTel(a) + ' · ' + (a.condicao||'');
+  document.getElementById('lote-fila-st').textContent = a.status || '';
+  document.getElementById('lote-fila-msg').textContent = loteAplicar(LOTE.msg, a);
+  foot.innerHTML = '<button class="btn bs" onclick="fecharEnvioLote()">Parar</button>'
+    + '<button class="btn bs" onclick="lotePular()">Pular</button>'
+    + '<button class="btn bwa" onclick="loteAbrirWpp()">💬 Abrir WhatsApp e ir para o próximo</button>';
+}
+function loteAbrirWpp() {
+  var a = LOTE.fila[LOTE.idx];
+  var txt = loteAplicar(LOTE.msg, a);
+  window.open('https://wa.me/' + loteTel(a) + '?text=' + encodeURIComponent(txt), 'wa_lote');
+  loteRegistrar(a, 'wpp', txt, LOTE.tplNome);
+  LOTE.ok++; LOTE.idx++;
+  if(LOTE.ok % 10 === 0) salvarDados();
+  renderLoteFila();
+}
+function lotePular() { LOTE.pulados++; LOTE.idx++; renderLoteFila(); }
+
+// ── E-mail: disparo automático ──
+function loteEnviarEmails() {
+  LOTE.rodando = true; LOTE.parar = false;
+  var body = document.getElementById('m-lote-body'), foot = document.getElementById('m-lote-footer');
+  foot.innerHTML = '<button class="btn bs" onclick="LOTE.parar=true">⏸ Parar</button>';
+  function tela() {
+    var f = LOTE.fila, feitos = LOTE.ok + LOTE.erro;
+    var pct = Math.round(feitos / f.length * 100);
+    body.innerHTML = '<div style="font-size:13px;font-weight:700">' + (LOTE.rodando ? 'Enviando e-mails…' : (LOTE.idx < f.length ? 'Envio interrompido' : 'Envio concluído')) + '</div>'
+      + '<div class="prg" style="height:8px;margin:10px 0"><div class="pb" style="width:'+pct+'%;background:#EA4335"></div></div>'
+      + '<div style="font-size:12px">' + feitos + ' de ' + f.length + ' · <span style="color:var(--vd)">' + LOTE.ok + ' enviados</span> · <span style="color:var(--vm)">' + LOTE.erro + ' com erro</span></div>'
+      + (LOTE.erros.length ? '<div style="margin-top:10px;font-size:11px;max-height:180px;overflow-y:auto;background:var(--vmb);border-radius:6px;padding:8px;white-space:pre-wrap" id="lote-erros"></div>' : '');
+    var el = document.getElementById('lote-erros');
+    if(el) el.textContent = LOTE.erros.slice(-30).join('\n');
+  }
+  function fim() {
+    LOTE.rodando = false; salvarDados(); tela();
+    foot.innerHTML = '<button class="btn bp" onclick="fecharEnvioLote()">Fechar</button>';
+    mostrarToast('✉️ ' + LOTE.ok + ' e-mails enviados' + (LOTE.erro ? ', ' + LOTE.erro + ' com erro' : ''));
+  }
+  function proximo() {
+    if(LOTE.parar || LOTE.idx >= LOTE.fila.length) { fim(); return; }
+    var a = LOTE.fila[LOTE.idx++];
+    var corpo = loteAplicar(LOTE.msg, a), assunto = loteAplicar(LOTE.assunto, a);
+    gasPost('enviar_email', { destino: String(a.email).trim(), assunto: assunto, corpo: corpo })
+      .then(function(d) {
+        if(d && (d.ok || d.semConfirmacao)) { LOTE.ok++; loteRegistrar(a, 'email', corpo, LOTE.tplNome); }
+        else { LOTE.erro++; LOTE.erros.push(a.nome + ': ' + ((d && d.erro) || 'sem resposta')); }
+      })
+      .catch(function(err) { LOTE.erro++; LOTE.erros.push(a.nome + ': ' + (err && err.message || 'falha')); })
+      .then(function() {
+        // Se os 3 primeiros falharem, provavelmente é configuração: para tudo
+        if(LOTE.ok === 0 && LOTE.erro >= 3 && !LOTE.parar) {
+          LOTE.parar = true;
+          LOTE.erros.push('Parado: os 3 primeiros envios falharam. Verifique a configuração de e-mail do GAS.');
+        }
+        tela();
+        setTimeout(proximo, 1200);
+      });
+  }
+  tela(); proximo();
+}
+
 
 // Envio em massa — abre modal de confirmação e envia via wa.me em sequência
 function envioBulk(canal) {
