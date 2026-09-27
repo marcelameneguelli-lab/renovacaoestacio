@@ -442,7 +442,8 @@ window.addEventListener('unhandledrejection', function(e) {
   <div id="tb">
     <h1 id="ttl">📊 Dashboard Geral</h1>
     <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
-      <span id="per-badge" class="badge baz" style="padding:4px 10px;font-size:12px">2026.1 &#xB7; Prazo: 30/04/2026</span>
+      <select id="ciclo-sel" onchange="trocarCiclo(this.value)" title="Ciclo de renovação em trabalho" style="font-size:12px;font-weight:700;padding:4px 8px;border-radius:6px;border:1px solid var(--azb);color:var(--az);background:var(--azl)"></select>
+      <span id="per-badge" class="badge baz" style="padding:4px 10px;font-size:12px">Prazo</span>
       <button class="btn bs bpq" onclick="exportCSV()">v CSV</button>
       <button class="dark-toggle" onclick="toggleDarkMode()" title="Modo escuro (Alt+D)" id="dark-btn">🌑</button>
       <span id="topbar-user" style="font-size:12px;color:var(--ct)"></span>
@@ -554,7 +555,7 @@ window.addEventListener('unhandledrejection', function(e) {
 <script>
 
 
-const VERSAO_SISTEMA = '1.0.0 · 14/05/2026';
+const VERSAO_SISTEMA = '2.0.0 · ciclos · 27/09/2026';
 const ADMIN_EMAIL_FIXO = 'marcela.meneguelli@gmail.com';
 const ADMIN_PASS_FIXO  = 'estacio2026';
 const ADMIN_NOME_FIXO  = 'Marcela Meneguelli';
@@ -661,6 +662,9 @@ function csvParaAluno(row) {
     cobAptoDesc: String(row.COB_APTO_DESCONTO||'').trim() !== '',
     periodoAtual: (row.PERIODO_ATUAL||'').trim(),
     situacaoPeriodo: (row.NOM_SITUACAO_PERIODO_ATUAL||'').trim(),
+    // PAR traz o ciclo em PERIODO_ATUAL (ex: "2026.2 EAD"); ÍMPAR traz em PERIODO (ex: 26.3)
+    ciclo: normCiclo(row.PERIODO_ATUAL||row.PERIODO||''),
+    statusCsv: status,
     turno: (row.NOM_TURNO||'').trim(),
     pastaVermelha: parseInt(row.PASTA_VERMELHA||0) === 1,
     semInad: parseInt(row.SEM_INAD||0),
@@ -731,6 +735,267 @@ let ALUNOS = (function() {
 })();
 let ACIONAMENTOS = JSON.parse(localStorage.getItem('acionamentos_v2')||'[]');
 let ENVIOS = JSON.parse(localStorage.getItem('envios_v2')||'[]');
+
+// ═══════════════════════════════════════════
+//  CICLOS DE RENOVAÇÃO (ÍMPAR .1/.3 · PAR .2/.4)
+//  Cada ciclo tem sua própria base (BASES[ciclo]), prazo, meta, metas por
+//  categoria, curva e histórico. ALUNOS aponta sempre para a base do ciclo
+//  selecionado (S.periodo). Acionamentos, envios e follow-ups gravam o ciclo.
+// ═══════════════════════════════════════════
+function normCiclo(p) {
+  p = String(p == null ? '' : p).trim().replace(',', '.');
+  var m = p.match(/^(\d{2})\.(\d)$/);
+  if(m) return '20' + m[1] + '.' + m[2];
+  m = p.match(/^(20\d{2})\.(\d)/);
+  if(m) return m[1] + '.' + m[2];
+  return p;
+}
+function tipoCiclo(c) {
+  var d = parseInt(String(c).slice(-1), 10);
+  if(isNaN(d)) return '';
+  return d % 2 ? 'ÍMPAR' : 'PAR';
+}
+function getCicloCfg() {
+  try { return JSON.parse(localStorage.getItem('ciclo_cfg') || '{}') || {}; } catch(e) { return {}; }
+}
+function setCicloCfg(cfg) {
+  try { localStorage.setItem('ciclo_cfg', JSON.stringify(cfg)); } catch(e) {}
+}
+function salvarCicloCfgGAS() {
+  if(!localStorage.getItem('gasUrl')) return;
+  gasGet('config').then(function(cfg) {
+    if(cfg && cfg.ciclo_cfg) mesclarCicloCfg(cfg.ciclo_cfg);
+  }).catch(function(){}).then(function() {
+    return gasPost('salvar_config', { chave: 'ciclo_cfg', valor: JSON.stringify(getCicloCfg()) });
+  }).catch(function(e){ console.warn('[CICLO] Falha ao sincronizar ciclo_cfg:', e && e.message); });
+}
+// Junta a configuração remota com a local: por ciclo, vale a mais recente (ts)
+function mesclarCicloCfg(remotoTxt) {
+  try {
+    var remoto = JSON.parse(remotoTxt || '{}') || {};
+    var local = getCicloCfg(), mudou = false;
+    Object.keys(remoto).forEach(function(c) {
+      var r = remoto[c] || {}, l = local[c];
+      if(!l || (r.ts || 0) > (l.ts || 0)) { local[c] = r; mudou = true; }
+    });
+    if(mudou) setCicloCfg(local);
+    return mudou;
+  } catch(e) { return false; }
+}
+function atualizarCicloCfg(c, dados) {
+  var cfg = getCicloCfg();
+  cfg[c] = Object.assign({}, cfg[c] || {}, dados, { ts: Date.now() });
+  setCicloCfg(cfg);
+  salvarCicloCfgGAS();
+}
+function prazoParaDate(str) {
+  var p = String(str || '').split('/');
+  if(p.length !== 3) return null;
+  var d = new Date(+p[2], +p[1] - 1, +p[0]);
+  return isNaN(d.getTime()) ? null : d;
+}
+// Ciclos conhecidos: com base carregada ou com configuração salva
+function cicloLista() {
+  var s = {};
+  Object.keys(BASES).forEach(function(c){ if(BASES[c] && BASES[c].length) s[c] = 1; });
+  Object.keys(getCicloCfg()).forEach(function(c){ if(/^\d{4}\.\d$/.test(c)) s[c] = 1; });
+  if(S.periodo) s[S.periodo] = 1;
+  return Object.keys(s).sort();
+}
+// Ciclo "aberto" = prazo não definido ou prazo há menos de 30 dias
+function cicloAberto(c) {
+  var cfg = getCicloCfg()[c] || {};
+  var d = prazoParaDate(cfg.prazo || (c === S.periodo ? S.prazo : ''));
+  if(!d) return true;
+  var limite = new Date(); limite.setHours(0,0,0,0); limite.setDate(limite.getDate() - 30);
+  return d >= limite;
+}
+function totalBasesLocal() {
+  return Object.keys(BASES).reduce(function(s, c){ return s + (BASES[c] ? BASES[c].length : 0); }, 0);
+}
+
+// ── Base de cada ciclo ──
+var BASES = {};
+(function initBases() {
+  try {
+    var b = JSON.parse(localStorage.getItem('bases_cache') || 'null');
+    if(b && typeof b === 'object' && !Array.isArray(b)) BASES = b;
+  } catch(e) {}
+  S.periodo = normCiclo(S.periodo) || S.periodo;
+  // Migração: cache antigo (uma base só, sem ciclo) vira um ciclo "legado".
+  // Na primeira importação que bater com esses alunos, ele é substituído.
+  if(!Object.keys(BASES).length && ALUNOS.length) {
+    // Descobre o ciclo da base antiga: PAR tem PERIODO_ATUAL ("2026.2 EAD");
+    // ÍMPAR não tem, então vale o ciclo ímpar do semestre corrente (.1 até junho, .3 depois)
+    var cont = {};
+    ALUNOS.forEach(function(a){ var c = normCiclo(a.periodoAtual || ''); if(/^\d{4}\.\d$/.test(c)) cont[c] = (cont[c]||0) + 1; });
+    var cLeg = Object.keys(cont).sort(function(x,y){ return cont[y]-cont[x]; })[0];
+    if(!cLeg) { var hj = new Date(); cLeg = hj.getFullYear() + (hj.getMonth() >= 6 ? '.3' : '.1'); }
+    var antigo = S.periodo;
+    if(cLeg !== antigo) {
+      try { var hl = localStorage.getItem('histren_' + antigo); if(hl && !localStorage.getItem('histren_' + cLeg)) localStorage.setItem('histren_' + cLeg, hl); } catch(e) {}
+      try { if(S.curvas && S.curvas[antigo] && !S.curvas[cLeg]) { S.curvas[cLeg] = S.curvas[antigo]; localStorage.setItem('curvas', JSON.stringify(S.curvas)); } } catch(e) {}
+    }
+    ALUNOS.forEach(function(a){ a.ciclo = cLeg; });
+    S.periodo = cLeg;
+    BASES[cLeg] = ALUNOS;
+    localStorage.setItem('bases_legado', cLeg);
+  }
+  // Se o ciclo salvo não tem base mas existem outras, abre o ciclo aberto mais recente
+  if(!(BASES[S.periodo] && BASES[S.periodo].length)) {
+    var comBase = Object.keys(BASES).filter(function(c){ return BASES[c] && BASES[c].length; }).sort();
+    var abertos = comBase.filter(cicloAberto);
+    var escolha = abertos.length ? abertos[abertos.length - 1] : comBase[comBase.length - 1];
+    if(escolha) S.periodo = escolha;
+  }
+  if(!BASES[S.periodo]) BASES[S.periodo] = [];
+  ALUNOS = BASES[S.periodo];
+  // Primeira execução com ciclos: prazo/meta que já estavam configurados viram do ciclo atual
+  var cfgIni = getCicloCfg();
+  if(!cfgIni[S.periodo] && localStorage.getItem('prazo')) {
+    cfgIni[S.periodo] = { prazo: S.prazo, metaFinal: S.metaFinal, ts: 0 };
+    setCicloCfg(cfgIni);
+  }
+  var cfg = getCicloCfg()[S.periodo];
+  if(cfg) {
+    if(cfg.prazo) S.prazo = cfg.prazo;
+    if(cfg.metaFinal) S.metaFinal = parseInt(cfg.metaFinal) || S.metaFinal;
+  }
+  localStorage.setItem('periodo', S.periodo);
+})();
+
+function definirBaseCiclo(c, lista) {
+  BASES[c] = lista;
+  if(c === S.periodo) ALUNOS = lista;
+  _idxCiclos = null;
+}
+// Recebe alunos do servidor (todos os ciclos) e distribui em BASES
+function aplicarBasesServidor(lista) {
+  var novo = {};
+  lista.forEach(function(a) {
+    var c = normCiclo(a.ciclo) || S.periodo;
+    a.ciclo = c;
+    (novo[c] = novo[c] || []).push(a);
+  });
+  Object.keys(novo).forEach(function(c){ definirBaseCiclo(c, novo[c]); });
+  if(novo[localStorage.getItem('bases_legado')]) localStorage.removeItem('bases_legado');
+  if(!BASES[S.periodo]) definirBaseCiclo(S.periodo, []);
+  ALUNOS = BASES[S.periodo];
+  try { renderSeletorCiclo(); } catch(e) {}
+}
+
+// ── Troca de ciclo ──
+function trocarCiclo(c, silencioso) {
+  c = normCiclo(c);
+  if(!c) return;
+  S.periodo = c;
+  localStorage.setItem('periodo', c);
+  if(!BASES[c]) BASES[c] = [];
+  ALUNOS = BASES[c];
+  var cfg = getCicloCfg()[c] || {};
+  if(cfg.prazo) { S.prazo = cfg.prazo; localStorage.setItem('prazo', cfg.prazo); }
+  if(cfg.metaFinal) { S.metaFinal = parseInt(cfg.metaFinal) || S.metaFinal; localStorage.setItem('metaFinal', String(S.metaFinal)); }
+  try { S.metaDia = calcMetaDiaAuto(); localStorage.setItem('metaDia', String(S.metaDia)); } catch(e) {}
+  if(S.fil) Object.keys(S.fil).forEach(function(k){ S.fil[k] = ''; });
+  var badge = document.getElementById('per-badge');
+  if(badge) badge.textContent = 'Prazo: ' + (cfg.prazo || S.prazo) + (cfg.prazo ? '' : ' (defina)');
+  renderSeletorCiclo();
+  if(!silencioso) {
+    if(!cfg.prazo || !cfg.metaFinal) mostrarToast('Ciclo ' + c + ' selecionado. Defina prazo e meta deste ciclo em Configurações.');
+    else mostrarToast('Ciclo ' + c + ' (' + tipoCiclo(c) + ') · ' + ALUNOS.length + ' alunos');
+  }
+  var t = window._telaAtiva || 'dash';
+  try {
+    var fn = {dash:rDash,alunos:rAlunos,followup:rFollowup,produtividade:rProdutividade,config:rConfig,importar:rImportar,renovados:rRenovados,relatorios:rRelatorios,envios:rEnvios}[t];
+    if(fn) fn(); else rDash();
+  } catch(e) { console.warn('[CICLO] render:', e.message); }
+  try { checkAlertas(); } catch(e) {}
+}
+
+function renderSeletorCiclo() {
+  var sel = document.getElementById('ciclo-sel');
+  if(!sel) return;
+  var lista = cicloLista();
+  var abertos = lista.filter(cicloAberto), antigos = lista.filter(function(c){ return !cicloAberto(c); });
+  function opt(c) {
+    var n = BASES[c] ? BASES[c].length : 0;
+    return '<option value="' + c + '"' + (c === S.periodo ? ' selected' : '') + '>' + c + ' · ' + tipoCiclo(c) + (n ? ' · ' + n : ' · sem base') + '</option>';
+  }
+  sel.innerHTML = abertos.map(opt).join('')
+    + (antigos.length ? '<optgroup label="Encerrados">' + antigos.map(opt).join('') + '</optgroup>' : '');
+  var badge = document.getElementById('per-badge');
+  var cfg = getCicloCfg()[S.periodo] || {};
+  if(badge) badge.textContent = 'Prazo: ' + (cfg.prazo || S.prazo);
+}
+
+// ── A que ciclo pertence um acionamento ──
+// Novos acionamentos gravam o ciclo. Os antigos (sem ciclo) são deduzidos:
+// se o aluno está em uma só base, é daquele ciclo; se está em mais de uma
+// (ou em nenhuma), vale o ciclo cujo prazo vem logo depois da data do acionamento.
+var _idxCiclos = null, _idxCiclosSig = '';
+function idxCiclos() {
+  var sig = Object.keys(BASES).map(function(c){ return c + ':' + (BASES[c] ? BASES[c].length : 0); }).join('|');
+  if(_idxCiclos && sig === _idxCiclosSig) return _idxCiclos;
+  _idxCiclos = {};
+  Object.keys(BASES).forEach(function(c) {
+    (BASES[c] || []).forEach(function(a) {
+      var id = String(a.id);
+      (_idxCiclos[id] = _idxCiclos[id] || []).push(c);
+    });
+  });
+  _idxCiclosSig = sig;
+  return _idxCiclos;
+}
+function cicloDoAc(ac) {
+  if(!ac) return '';
+  if(ac.ciclo) return normCiclo(ac.ciclo);
+  var cands = idxCiclos()[String(ac.alunoId)] || [];
+  if(cands.length === 1) return cands[0];
+  var pool = cands.length ? cands : cicloLista();
+  var dAc = prazoParaDate(ac.data);
+  var cfg = getCicloCfg();
+  if(dAc) {
+    var melhor = null, melhorD = null;
+    pool.forEach(function(c) {
+      var dp = prazoParaDate((cfg[c] || {}).prazo || (c === S.periodo ? S.prazo : ''));
+      if(dp && dp >= dAc && (!melhorD || dp < melhorD)) { melhor = c; melhorD = dp; }
+    });
+    if(melhor) return melhor;
+  }
+  return pool.slice().sort().pop() || S.periodo;
+}
+var _acsCache = { k: '', v: [] };
+function acsCiclo(c) {
+  c = c || S.periodo;
+  var k = c + '|' + ACIONAMENTOS.length + '|' + _idxCiclosSig + '|' + (ACIONAMENTOS.length ? ACIONAMENTOS[ACIONAMENTOS.length-1].id : '');
+  idxCiclos();
+  if(_acsCache.k === k) return _acsCache.v;
+  var v = ACIONAMENTOS.filter(function(ac){ return cicloDoAc(ac) === c; });
+  _acsCache = { k: k, v: v };
+  return v;
+}
+function alunoEmQualquerCiclo(id, cPref) {
+  id = String(id);
+  if(cPref && BASES[cPref]) { var a = BASES[cPref].find(function(x){ return String(x.id) === id; }); if(a) return a; }
+  var cs = Object.keys(BASES);
+  for(var i = 0; i < cs.length; i++) {
+    var b = (BASES[cs[i]] || []).find(function(x){ return String(x.id) === id; });
+    if(b) return b;
+  }
+  return null;
+}
+// Status que a base CSV dá ao aluno (antes de qualquer acionamento)
+function statusBaseCsv(a) {
+  if(a.statusCsv) return a.statusCsv;
+  var cond = String(a.condicao || '').toUpperCase();
+  var st = 'Pendente';
+  if(cond.indexOf('RENOVADO') >= 0) st = 'Renovado';
+  else if(cond.indexOf('CANCELAD') >= 0 || cond.indexOf('EVADID') >= 0) st = 'Evadido';
+  else if(cond.indexOf('TRANCAD') >= 0) st = 'Trancamento';
+  if(st === 'Pendente' && String(a.tipoInad || '').toUpperCase().indexOf('NEGOCIACAO') >= 0) st = 'Em negociação';
+  return st;
+}
+
 let alunoSel = null;
 let envioCtx = { canal:'wpp', tpl:null, aluno:null };
 
@@ -749,29 +1014,19 @@ function salvarDados() {
     localStorage.setItem('envios_v2', JSON.stringify(ENVIOS.slice(-100)));
   } catch(e) {}
 
-  // ── Alunos: cache com todos os campos do objeto ───────────────
-  // Antes usava uma lista manual de campos, que ficava desatualizada
-  // toda vez que um campo novo era adicionado (ex: 'bu'), fazendo esses
-  // campos sumirem depois de recarregar a página. Agora salva o objeto
-  // inteiro, só zerando o array de acionamentos (que não é usado daqui,
-  // fica só no array global ACIONAMENTOS).
-  if(ALUNOS.length > 0) {
-    try {
-      var cache = ALUNOS.map(function(a) {
-        return Object.assign({}, a, { acionamentos: [] });
-      });
-      localStorage.setItem('alunos_cache', JSON.stringify(cache));
-    } catch(e) {
-      // Quota excedida: salvar só os campos essenciais
-      try {
-        var mini = ALUNOS.map(function(a){
-          return { id:a.id, nome:a.nome, status:a.status,
-                   cpfDigitado:a.cpfDigitado||'', elegivelEstagio:a.elegivelEstagio||'' };
-        });
-        localStorage.setItem('alunos_cache', JSON.stringify(mini));
-        console.warn('Cache de alunos reduzido (quota).');
-      } catch(e2) {}
-    }
+  // ── Alunos: cache de TODAS as bases, separadas por ciclo ────────
+  try {
+    var cacheB = {};
+    Object.keys(BASES).forEach(function(c) {
+      if(!BASES[c] || !BASES[c].length) return;
+      cacheB[c] = BASES[c].map(function(a){ return Object.assign({}, a, { acionamentos: [] }); });
+    });
+    localStorage.setItem('bases_cache', JSON.stringify(cacheB));
+    localStorage.removeItem('alunos_cache');
+  } catch(e) {
+    // Quota excedida: sem cache local, a base volta do servidor ao abrir
+    try { localStorage.removeItem('bases_cache'); } catch(e2) {}
+    console.warn('Cache de bases não coube no navegador; será recarregado do servidor.');
   }
 }
 
@@ -965,7 +1220,7 @@ function ir(t) {
                   tipo:ac.tipo||'', colab:ac.colab||'', obs:ac.obs||'',
                   fuData:ac.fuData||'', fuTipo:ac.fuTipo||'', fuPara:ac.fuPara||ac.colab||'',
                   fuStatus:ac.fuStatus||(ac.fuData?'Agendado':'OK'),
-                  stAl:ac.stAl||'', data:ac.data||'', hora:ac.hora||'', _ts:ac._ts||0,
+                  stAl:ac.stAl||'', data:ac.data||'', hora:ac.hora||'', _ts:ac._ts||0, ciclo:ac.ciclo||'',
                 });
                 mudou = true;
               } else if(ac.fuStatus === 'OK' && existe.fuStatus !== 'OK') {
@@ -1207,14 +1462,20 @@ function _buildDashFu() {
 
 function getMetasCategoria(campo) {
   // campo: 'modalidade' ou 'bu' — retorna mapa { nomeCategoria: metaNumero } salvo manualmente
-  try { return JSON.parse(localStorage.getItem('metas_'+campo) || '{}'); } catch(e) { return {}; }
+  try {
+    var proprio = localStorage.getItem('metas_'+campo+'_'+S.periodo);
+    if(proprio) return JSON.parse(proprio) || {};
+    // Metas salvas antes da separação por ciclo eram da base ÍMPAR
+    if(tipoCiclo(S.periodo) === 'ÍMPAR') return JSON.parse(localStorage.getItem('metas_'+campo) || '{}') || {};
+    return {};
+  } catch(e) { return {}; }
 }
 function salvarMetasCategoria(campo, mapa) {
-  localStorage.setItem('metas_'+campo, JSON.stringify(mapa));
+  localStorage.setItem('metas_'+campo+'_'+S.periodo, JSON.stringify(mapa));
   // Sincronizar com o GAS para todos os atendentes verem a mesma meta
   var gasUrl = localStorage.getItem('gasUrl');
   if(gasUrl) {
-    gasPost('salvar_config', { chave: 'metas_'+campo, valor: JSON.stringify(mapa) })
+    gasPost('salvar_config', { chave: 'metas_'+campo+'_'+S.periodo, valor: JSON.stringify(mapa) })
       .catch(function(e){ console.warn('[METAS] Falha ao sincronizar metas_'+campo+':', e.message); });
   }
 }
@@ -1252,18 +1513,31 @@ function carregarConfigGeralGAS() {
       try { checkAlertas(); } catch(e){}
       if(window._telaAtiva === 'followup') { try { rFollowup(); } catch(e){} }
     }
-    if(!cfg || !cfg.config_geral) return;
+    if(!cfg) return;
+    // Migração: configuração antiga (um período só) vira a config do ciclo atual
+    if(cfg.config_geral && !getCicloCfg()[S.periodo]) {
+      try {
+        var velho = JSON.parse(cfg.config_geral);
+        var cfgAll = getCicloCfg();
+        cfgAll[S.periodo] = { prazo: velho.prazo || S.prazo, metaFinal: velho.metaFinal || S.metaFinal, ts: 0 };
+        setCicloCfg(cfgAll);
+      } catch(e) {}
+    }
     try {
-      var remoto = JSON.parse(cfg.config_geral);
+      // Cada atendente escolhe o ciclo que está trabalhando. Prazo e meta
+      // vêm da configuração DO CICLO (ciclo_cfg), compartilhada por todos.
       var mudou = false;
-      if(remoto.periodo && remoto.periodo !== S.periodo) { S.periodo = remoto.periodo; localStorage.setItem('periodo', remoto.periodo); mudou = true; }
-      if(remoto.prazo && remoto.prazo !== S.prazo) { S.prazo = remoto.prazo; localStorage.setItem('prazo', remoto.prazo); mudou = true; }
-      if(remoto.metaFinal && remoto.metaFinal !== S.metaFinal) { S.metaFinal = remoto.metaFinal; localStorage.setItem('metaFinal', String(remoto.metaFinal)); mudou = true; }
+      if(cfg.ciclo_cfg && mesclarCicloCfg(cfg.ciclo_cfg)) {
+        var cc = getCicloCfg()[S.periodo] || {};
+        if(cc.prazo && cc.prazo !== S.prazo) { S.prazo = cc.prazo; localStorage.setItem('prazo', cc.prazo); mudou = true; }
+        if(cc.metaFinal && parseInt(cc.metaFinal) !== S.metaFinal) { S.metaFinal = parseInt(cc.metaFinal); localStorage.setItem('metaFinal', String(S.metaFinal)); mudou = true; }
+        try { renderSeletorCiclo(); } catch(e) {}
+      }
       if(mudou) {
         S.metaDia = calcMetaDiaAuto();
         localStorage.setItem('metaDia', String(S.metaDia));
         var badge = document.getElementById('per-badge');
-        if(badge) badge.textContent = S.periodo + ' · Prazo: ' + S.prazo;
+        if(badge) badge.textContent = 'Prazo: ' + S.prazo;
         if(window._telaAtiva === 'dash')   { try { rDash(); } catch(e){} }
         if(window._telaAtiva === 'config') { try { rConfig(); } catch(e){} }
       }
@@ -1430,7 +1704,7 @@ function carregarMetasCategoriasGAS() {
     if(!cfg) return;
     var mudou = false;
     ['modalidade','bu'].forEach(function(campo) {
-      var chave = 'metas_'+campo;
+      var chave = 'metas_'+campo+'_'+S.periodo;
       if(cfg[chave]) {
         try {
           var remoto = JSON.parse(cfg[chave]);
@@ -1476,7 +1750,7 @@ function rDash() {
   // Colaboradores ranking — usa ac.stAl direto (não depende do status atual de ALUNOS,
   // que pode estar dessincronizado entre navegadores). Mesmo critério da tela Produtividade.
   const colab={};
-  ACIONAMENTOS.forEach(a=>{if(!colab[a.colab])colab[a.colab]={total:0,ren:0};colab[a.colab].total++;if(a.stAl==='Renovado')colab[a.colab].ren++;});
+  acsCiclo().forEach(a=>{if(!colab[a.colab])colab[a.colab]={total:0,ren:0};colab[a.colab].total++;if(a.stAl==='Renovado')colab[a.colab].ren++;});
   const rk=Object.entries(colab).sort((a,b)=>b[1].ren-a[1].ren).slice(0,5);
   const mxRen=rk.length?rk[0][1].ren:1;
   const enviosHoje=ENVIOS.filter(e=>dataIgual(e.data, new Date().toLocaleDateString('pt-BR'))).length;
@@ -1801,6 +2075,7 @@ function filtrar() {
 }
 
 function rAlunos() {
+  try { sincronizarStatusAlunos(); } catch(e) {}
   if(ALUNOS.length === 0) {
     document.getElementById('tela-alunos').innerHTML=`
       <div style="text-align:center;padding:60px 20px;color:var(--ct)">
@@ -2613,9 +2888,9 @@ function rImportar() {
         <span style="font-size:12px">Importe diariamente. O histórico de acionamentos é preservado automaticamente.</span>
       </p>
       <div class="fg" style="max-width:280px;margin-bottom:12px">
-        <label>Esta base é do semestre</label>
-        <input type="text" id="import-periodo" value="${S.periodo}" placeholder="Ex: 2026.2" style="width:100%">
-        <small style="color:var(--ct);font-size:11px">Se for diferente do período ativo atual (${S.periodo}), o sistema muda para este ao importar.</small>
+        <label>Ciclo da base (só se o CSV não tiver a coluna PERIODO)</label>
+        <input type="text" id="import-periodo" value="" placeholder="Ex: 2026.3" style="width:100%">
+        <small style="color:var(--ct);font-size:11px">O ciclo é lido do próprio arquivo (coluna PERIODO: 26.3 = ciclo 2026.3 ÍMPAR, 26.4 = 2026.4 PAR). Importar um ciclo não mexe nos outros.</small>
       </div>
       <div class="imp-box" id="imp-box" onclick="document.getElementById('csv-input').click()"
            ondrop="dropCSV(event)" ondragover="event.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')">
@@ -2847,21 +3122,9 @@ function processCSV(file) {
   const status = document.getElementById('imp-status');
   status.innerHTML='<p style="color:var(--azm)">⏳ Processando...</p>';
 
-  // Semestre informado para esta base — se diferente do período ativo,
-  // atualiza o sistema (e sincroniza com o GAS para todos os atendentes)
-  const periodoInformado = (document.getElementById('import-periodo')?.value || '').trim();
-  if(periodoInformado && periodoInformado !== S.periodo) {
-    S.periodo = periodoInformado;
-    localStorage.setItem('periodo', periodoInformado);
-    const badge = document.getElementById('per-badge');
-    if(badge) badge.textContent = periodoInformado + ' · Prazo: ' + S.prazo;
-    var gasUrl = localStorage.getItem('gasUrl');
-    if(gasUrl) {
-      gasPost('salvar_config', { chave: 'config_geral', valor: JSON.stringify({ periodo: S.periodo, prazo: S.prazo, metaFinal: S.metaFinal, numAtend: S.numAtend }) })
-        .catch(function(e){ console.warn('[CONFIG] Falha ao sincronizar novo período:', e.message); });
-    }
-    mostrarToast('Período ativo alterado para ' + periodoInformado);
-  }
+  // O ciclo vem da coluna PERIODO do próprio CSV (ex: 26.3 → 2026.3).
+  // O campo da tela só é usado se o arquivo não tiver essa coluna.
+  const periodoInformado = normCiclo((document.getElementById('import-periodo')?.value || '').trim());
 
   const reader = new FileReader();
   reader.onload = function(e) {
@@ -2911,7 +3174,32 @@ function processCSV(file) {
         novos.push(aluno);
       }
       
-      ALUNOS = novos
+      // ── Ciclo desta base ──
+      const contCiclo = {};
+      novos.forEach(function(a){ if(a.ciclo) contCiclo[a.ciclo] = (contCiclo[a.ciclo]||0) + 1; });
+      let cicloImp = Object.keys(contCiclo).sort(function(x,y){ return contCiclo[y]-contCiclo[x]; })[0]
+        || periodoInformado || S.periodo;
+      cicloImp = normCiclo(cicloImp);
+      novos.forEach(function(a){ a.ciclo = cicloImp; });
+      // Base antiga sem ciclo (de antes da separação): se for a mesma turma, é substituída
+      const leg = localStorage.getItem('bases_legado');
+      if(leg === cicloImp) localStorage.removeItem('bases_legado');
+      if(leg && leg !== cicloImp && BASES[leg] && BASES[leg].length) {
+        const idsNovos = new Set(novos.map(function(a){ return String(a.id); }));
+        const iguais = BASES[leg].filter(function(a){ return idsNovos.has(String(a.id)); }).length;
+        if(iguais >= BASES[leg].length * 0.5) {
+          const cfgAll = getCicloCfg();
+          if(cfgAll[leg] && !cfgAll[cicloImp]) cfgAll[cicloImp] = Object.assign({}, cfgAll[leg], { ts: Date.now() });
+          if(cfgAll[leg] && !cfgAll[leg].ts) delete cfgAll[leg];
+          setCicloCfg(cfgAll); salvarCicloCfgGAS();
+          try { const hl = localStorage.getItem('histren_'+leg); if(hl && !localStorage.getItem('histren_'+cicloImp)) localStorage.setItem('histren_'+cicloImp, hl); } catch(e) {}
+          delete BASES[leg];
+          localStorage.removeItem('bases_legado');
+        }
+      }
+      definirBaseCiclo(cicloImp, novos);
+      if(cicloImp !== S.periodo) trocarCiclo(cicloImp, true);
+      else { ALUNOS = novos; renderSeletorCiclo(); }
       salvarDados(); // salvar cache;
       localStorage.setItem('ultImp', new Date().toLocaleString('pt-BR'));
       salvarDados();
@@ -2922,7 +3210,8 @@ function processCSV(file) {
       
       status.innerHTML=`<div style="background:var(--vdb);border:1px solid var(--vd);border-radius:8px;padding:12px;margin-top:10px">
         <p style="color:var(--vd);font-weight:700;font-size:14px;margin-bottom:6px">&#10003; Importação concluída!</p>
-        <p style="font-size:13px">${novos.length} alunos importados · Renovados: ${ren} · Pendentes: ${pen} · Negociando: ${neg}</p>
+        <p style="font-size:13px"><strong>Ciclo ${cicloImp} (${tipoCiclo(cicloImp)})</strong> · ${novos.length} alunos importados · Renovados: ${ren} · Pendentes: ${pen} · Negociando: ${neg}</p>
+        <p style="font-size:12px;color:var(--ct)">Só a base deste ciclo foi substituída. Os outros ciclos continuam como estavam.</p>
         <div style="margin-top:8px;display:flex;gap:7px">
           <button class="btn bp bpq" onclick="ir('alunos')">🎓 Ver Alunos</button>
           <button class="btn bs bpq" onclick="ir('dash')">Dashboard</button>
@@ -2939,7 +3228,7 @@ function processCSV(file) {
       const _gasUrl = localStorage.getItem('gasUrl');
       if(_gasUrl) {
         mostrarToast('Enviando base para o servidor (pode levar alguns segundos)...');
-        gasPost('importar_alunos', { alunos: novos })
+        gasPost('importar_alunos', { alunos: novos, ciclo: cicloImp })
           .then(function(d){
             if(d.ok && d.semConfirmacao) {
               // Payload grande — foi enviado via POST sem leitura de resposta.
@@ -2993,7 +3282,7 @@ function importarDoDrive() {
 }
 
 function limparBase() {
-  ALUNOS=[];
+  definirBaseCiclo(S.periodo, []);
   localStorage.removeItem('alunos_v2');
   localStorage.removeItem('ultImp');
   mostrarToast('Base limpa. Importe o novo CSV.');
@@ -3008,9 +3297,11 @@ function rFollowup() {
   const amanha = new Date(hoje); amanha.setDate(hoje.getDate()+1);
 
   const filtroAtual = window._fuFiltro || 'todos'; // 'todos' | 'meus'
+  const cicloFiltro = window._fuCiclo || 'atual';  // 'atual' | 'todos'
 
-  // Follow-ups: todos os acionamentos com fuData pendente (de todos os atendentes)
-  let fu = ACIONAMENTOS.filter(a=>a.fuData && !fuConcluido(a))
+  // Follow-ups: acionamentos com fuData pendente (de todos os atendentes),
+  // do ciclo selecionado ou de todos os ciclos
+  let fu = (cicloFiltro === 'todos' ? ACIONAMENTOS : acsCiclo()).filter(a=>a.fuData && !fuConcluido(a))
     .sort((a,b)=>(parseFuData(a.fuData)||0)-(parseFuData(b.fuData)||0));
 
   if(filtroAtual === 'meus' && S.colab) {
@@ -3022,7 +3313,9 @@ function rFollowup() {
   const proximos  = fu.filter(f=>{ var d=parseFuData(f.fuData); return d && d>=amanha; });
 
   function fuCard(f, tipo) {
-    const al = ALUNOS.find(a=>a.id===f.alunoId);
+    const cicloFu = cicloDoAc(f);
+    const al = alunoEmQualquerCiclo(f.alunoId, cicloFu);
+    const outroCiclo = cicloFu !== S.periodo;
     // Usar dados do acionamento se aluno não estiver carregado localmente
     const nome   = al ? al.nome : (f.nomeAluno || 'Aluno #' + f.alunoId);
     const critCls = al ? (al.criticidadeFin==='Alta'?'bvm':al.criticidadeFin==='Média'?'bla':'bvd') : 'bcz';
@@ -3035,7 +3328,7 @@ function rFollowup() {
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
         <div style="min-width:0">
           <div style="font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${nome}</div>
-          <div style="font-size:11px;color:var(--ct);margin-top:1px">${f.fuTipo||'Follow-up'} · ${f.fuData}</div>
+          <div style="font-size:11px;color:var(--ct);margin-top:1px">${f.fuTipo||'Follow-up'} · ${f.fuData}${cicloFiltro==='todos'?` · <span class="badge ${outroCiclo?'bla':'baz'}" style="font-size:9px">${cicloFu}</span>`:''}</div>
           <div style="font-size:11px;color:var(--ct)">Agendado por: ${f.colab||'—'}</div>
           <div style="font-size:11px;margin-top:2px">
             <span class="badge ${ehMeu?'bvd':'baz'}" style="font-size:10px">${ehMeu?'Para mim':'Para: '+responsavel}</span>
@@ -3045,8 +3338,9 @@ function rFollowup() {
         <span class="badge ${critCls}" style="font-size:10px;flex-shrink:0">${crit}</span>
       </div>
       <div style="display:flex;gap:6px;margin-top:9px;flex-wrap:wrap">
-        ${al?`<button class="btn bp bpq" onclick="abrirAluno('${idAttr}')">📞 Acionar</button>`:''}
-        ${al?`<button class="btn bwa bpq" onclick="abrirEnvioRapido('${idAttr}','wpp')">WPP</button>`:''}
+        ${al && !outroCiclo?`<button class="btn bp bpq" onclick="abrirAluno('${idAttr}')">📞 Acionar</button>`:''}
+        ${al && !outroCiclo?`<button class="btn bwa bpq" onclick="abrirEnvioRapido('${idAttr}','wpp')">WPP</button>`:''}
+        ${al && outroCiclo?`<button class="btn bs bpq" onclick="trocarCiclo('${cicloFu}')">Ir para ${cicloFu}</button>`:''}
         <button class="btn bv bpq" onclick="concluirFu('${String(f.id).replace(/[^\w.-]/g,'')}')">&#10003; OK</button>
       </div>
     </div>`;
@@ -3074,6 +3368,10 @@ function rFollowup() {
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
   <h2 style="font-size:15px;font-weight:700">🔔 Follow-Ups Pendentes <span style="color:var(--ct);font-weight:400">(${total})</span></h2>
   <div style="display:flex;gap:6px;align-items:center">
+    <select onchange="window._fuCiclo=this.value;rFollowup()" style="font-size:12px;padding:5px 8px;border-radius:6px;border:1px solid var(--cbr)">
+      <option value="atual" ${cicloFiltro==='atual'?'selected':''}>Ciclo ${S.periodo}</option>
+      <option value="todos" ${cicloFiltro==='todos'?'selected':''}>Todos os ciclos</option>
+    </select>
     <select onchange="window._fuFiltro=this.value;rFollowup()" style="font-size:12px;padding:5px 8px;border-radius:6px;border:1px solid var(--cbr)">
       <option value="todos" ${filtroAtual==='todos'?'selected':''}>Todos os atendentes</option>
       <option value="meus" ${filtroAtual==='meus'?'selected':''}>Somente os meus</option>
@@ -3238,7 +3536,7 @@ function rRenovados() {
   // Mapear o timestamp do último acionamento de cada aluno, para ordenar
   // do mais recente para o mais antigo (em vez da ordem de importação)
   const ultimoTsPorAluno = {};
-  ACIONAMENTOS.forEach(ac => {
+  acsCiclo().forEach(ac => {
     const ts = ac._ts || 0;
     if(!ultimoTsPorAluno[ac.alunoId] || ts > ultimoTsPorAluno[ac.alunoId]) {
       ultimoTsPorAluno[ac.alunoId] = ts;
@@ -3277,7 +3575,7 @@ function tabG(el,id) {
 // filtrando por status marcado, atendente, período e texto na observação.
 function calcRelatorioData() {
   const f = window._relFiltros || {};
-  let acs = [...ACIONAMENTOS];
+  let acs = window._relTodosCiclos ? [...ACIONAMENTOS] : [...acsCiclo()];
 
   if(f.status && f.status !== 'todos') {
     acs = acs.filter(a => a.stAl === f.status);
@@ -3829,7 +4127,15 @@ function salvarConfigPeriodo() {
   const metaFinal = parseInt(document.getElementById('cfg-meta-final')?.value) || S.metaFinal;
   const numAtend  = parseInt(document.getElementById('cfg-num-atend')?.value)  || S.numAtend;
 
-  S.periodo   = periodo;
+  const periodoNorm = normCiclo(periodo) || periodo;
+  atualizarCicloCfg(periodoNorm, { prazo: prazo, metaFinal: metaFinal });
+  if(periodoNorm !== S.periodo) {
+    S.numAtend = numAtend; localStorage.setItem('numAtend', String(numAtend));
+    trocarCiclo(periodoNorm);
+    mostrarToast('&#10003; Ciclo ' + periodoNorm + ' configurado.');
+    return;
+  }
+  S.periodo   = periodoNorm;
   S.prazo     = prazo;
   S.metaFinal = metaFinal;
   S.numAtend  = numAtend;
@@ -3842,7 +4148,7 @@ function salvarConfigPeriodo() {
   localStorage.setItem('numAtend',  String(numAtend));
   localStorage.setItem('metaDia',   String(S.metaDia));
 
-  document.getElementById('per-badge').textContent = periodo + ' · Prazo: ' + prazo;
+  try { renderSeletorCiclo(); } catch(e) {}
 
   // Sincronizar com o GAS — sem isso, cada navegador ficava com seu próprio
   // período/meta local, causando divergências (ex: curva importada num
@@ -3887,21 +4193,23 @@ function calcMetaDiaAuto() {
 
 // Recalcular status dos alunos a partir dos acionamentos (fonte mais atual)
 function sincronizarStatusAlunos() {
-  // Status dos acionamentos só pode SUBIR o status do aluno (hierarquia).
-  // E o CSV é soberano: se a condição da base diz "ALUNO RENOVADO", o aluno é Renovado,
-  // mesmo que algum acionamento antigo tenha gravado outro status por cima.
+  // O status é sempre recalculado: parte do status da base CSV do ciclo e sobe
+  // (nunca desce) com os acionamentos DESTE ciclo. Assim um "Renovado" de um
+  // semestre não vaza para o outro, e o CSV "ALUNO RENOVADO" é sempre soberano.
   var hierarquia = { 'Renovado': 4, 'Trancamento': 3, 'Em negociação': 2, 'Evadido': 1, 'Pendente': 0 };
   var melhorPorAluno = {};
-  ACIONAMENTOS.forEach(function(ac) {
+  acsCiclo(S.periodo).forEach(function(ac) {
     if(!ac.stAl || !ac.alunoId) return;
     var id = String(ac.alunoId);
     var atual = melhorPorAluno[id] || 'Pendente';
     if((hierarquia[ac.stAl]||0) > (hierarquia[atual]||0)) melhorPorAluno[id] = ac.stAl;
   });
   ALUNOS.forEach(function(a) {
+    var st = statusBaseCsv(a);
     var melhorAc = melhorPorAluno[String(a.id)] || 'Pendente';
-    if((hierarquia[melhorAc]||0) > (hierarquia[a.status]||0)) a.status = melhorAc;
-    if(csvRenovado(a) && a.status !== 'Renovado') a.status = 'Renovado';
+    if((hierarquia[melhorAc]||0) > (hierarquia[st]||0)) st = melhorAc;
+    if(csvRenovado(a)) st = 'Renovado';
+    a.status = st;
   });
 }
 
@@ -4017,7 +4325,7 @@ function calcRitmo() {
   } else {
     // Fallback: calcular pelo histórico de acionamentos
     const porData = {};
-    ACIONAMENTOS.forEach(a => {
+    acsCiclo().forEach(a => {
       if(a.stAl==='Renovado' && a.data) porData[a.data] = (porData[a.data]||0)+1;
     });
     const vals = Object.values(porData);
@@ -4046,7 +4354,7 @@ function calcRitmo() {
     : mediaDiariaReal >= metaNecDiaTotal * 0.7 ? 'alerta' : 'urgente';
 
   const hojeStr = hoje.toLocaleDateString('pt-BR');
-  const renHoje = ACIONAMENTOS.filter(a=>dataIgual(a.data, hojeStr) && a.stAl==='Renovado').length;
+  const renHoje = acsCiclo().filter(a=>dataIgual(a.data, hojeStr) && a.stAl==='Renovado').length;
 
   return {
     renovados, falta, metaFinal: S.metaFinal, totalBase, naoRenovados, pendentesBase,
@@ -4339,7 +4647,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   const hj=new Date();
   document.getElementById('sb-data').textContent=hj.toLocaleDateString('pt-BR',{weekday:'short',day:'2-digit',month:'short'});
   document.getElementById('sb-colab').textContent=S.colab||'Não identificado';
-  document.getElementById('per-badge').textContent = S.periodo + ' · Prazo: ' + S.prazo;
+  try { renderSeletorCiclo(); } catch(e) {}
   // ── SEM LOGIN — acesso direto ───────────────────────────────
   // Sem login — acesso direto
   if(S.adminEmail && S.adminPass) {
@@ -4432,7 +4740,7 @@ function rProdutividade() {
 
 function calcProdData(filtroPer, filtroColab, filtroPerfil) {
   // Filtrar acionamentos pelo período e colaborador
-  let acs = [...ACIONAMENTOS];
+  let acs = window._prodTodosCiclos ? [...ACIONAMENTOS] : [...acsCiclo()];
 
   if(filtroPer && filtroPer !== 'todos') {
     const hoje = new Date(); hoje.setHours(23,59,59,999); // incluir o dia inteiro
@@ -5029,6 +5337,7 @@ function forcarSincronizacaoTotal() {
           data:     ac.data || '',
           hora:     ac.hora || '',
           _ts:      ac._ts || 0,
+          ciclo:    ac.ciclo || '',
         });
         if(ac.stAl && ac.stAl !== 'Pendente') {
           var al = ALUNOS.find(function(a){ return a.id === String(ac.alunoId); });
@@ -5117,6 +5426,7 @@ function adminResetTotal() {
   if(!confirm('Última chance: tem certeza absoluta? Todos os dados serão perdidos.')) return;
   ['alunos_v2','acionamentos_v2','envios_v2','curvas','periodo','prazo','metaFinal','metaDia','numAtend','ultImp'].forEach(k=>localStorage.removeItem(k));
   ALUNOS.length=0; ACIONAMENTOS.length=0; ENVIOS.length=0;
+  Object.keys(BASES).forEach(function(c){ if(BASES[c]) BASES[c].length = 0; }); try { localStorage.removeItem('bases_cache'); } catch(e) {}
   S.curvas={};
   fcModal('m-admin');
   mostrarToast('&#x25CF; Reset total realizado.');
@@ -5218,15 +5528,16 @@ function recarregarBaseGAS() {
         var novaBase = [];
         d.alunos.forEach(function(a) {
           a.id = String(a.id); a.acionamentos = [];
-          a.cpfDigitado = a.cpf||'';
-          a.celularOriginal = String(a.telefone||'').replace('+55','');
-          a.divTotal = parseFloat(a.divTotal)||0;
-          a.formando = a.formando===true||a.formando==='S';
-          a.faixaDivida = a.faixaDivida==='0'?'Sem divida':(a.faixaDivida||'');
+          if(!a._full) {
+            a.cpfDigitado = a.cpf||'';
+            a.celularOriginal = String(a.telefone||'').replace('+55','');
+            a.divTotal = parseFloat(a.divTotal)||0;
+            a.formando = a.formando===true||a.formando==='S';
+            a.faixaDivida = a.faixaDivida==='0'?'Sem divida':(a.faixaDivida||'');
+          }
           novaBase.push(a);
         });
-        ALUNOS.length = 0;
-        novaBase.forEach(function(a){ ALUNOS.push(a); });
+        aplicarBasesServidor(novaBase);
         try { sincronizarStatusAlunos(); } catch(e) {}
         salvarDados();
         mostrarToast('&#10003; Base carregada: ' + ALUNOS.length + ' alunos.');
@@ -5271,20 +5582,21 @@ function carregarHistoricoGAS() {
           return;
         }
         if(d.alunos && d.alunos.length > 0) {
+          var recebidos = [];
           d.alunos.forEach(function(a) {
             a.id              = String(a.id);
             a.acionamentos    = [];
-            a.cpfDigitado     = a.cpf || '';
-            a.celularOriginal = String(a.telefone||'').replace('+55','');
-            a.divTotal        = parseFloat(a.divTotal) || 0;
-            a.formando        = a.formando === true || a.formando === 'S';
-            a.faixaDivida     = a.faixaDivida === '0' ? 'Sem dívida' : (a.faixaDivida||'');
-            // Aplicar status que chegou via sync antes da base carregar
-            if(window._statusPendente && window._statusPendente[a.id]) {
-              a.status = window._statusPendente[a.id];
+            if(!a._full) {
+              a.cpfDigitado     = a.cpf || '';
+              a.celularOriginal = String(a.telefone||'').replace('+55','');
+              a.divTotal        = parseFloat(a.divTotal) || 0;
+              a.formando        = a.formando === true || a.formando === 'S';
+              a.faixaDivida     = a.faixaDivida === '0' ? 'Sem dívida' : (a.faixaDivida||'');
             }
-            ALUNOS.push(a);
+            recebidos.push(a);
           });
+          aplicarBasesServidor(recebidos);
+          try { sincronizarStatusAlunos(); } catch(e) {}
           // Limpar mapa de status pendentes
           window._statusPendente = {};
           console.log('[GAS] Base carregada:', ALUNOS.length, 'alunos');
@@ -5340,7 +5652,7 @@ function carregarAcionamentosGAS() {
               stAl:     ac.stAl      || '',
               data:     ac.data      || '',
               hora:     ac.hora      || '',
-              _ts:      ac._ts       || 0,
+              _ts:      ac._ts       || 0, ciclo: ac.ciclo || '',
             });
             if(ac.stAl && ac.stAl !== 'Pendente') {
               var al = ALUNOS.find(function(a){ return a.id===String(ac.alunoId); });
@@ -5461,7 +5773,7 @@ function iniciarRealtime() {
                   stAl:     ac.stAl      || '',
                   data:     ac.data      || '',
                   hora:     ac.hora      || '',
-                  _ts:      ac._ts       || 0,
+                  _ts:      ac._ts       || 0, ciclo: ac.ciclo || '',
                 });
                 // Atualizar status do aluno correspondente
                 if(ac.stAl && ac.stAl !== 'Pendente') {
@@ -5533,10 +5845,17 @@ function iniciarRealtime() {
 
         // ── Detectar reimportação de base pelos outros ────────────
         if(d.totalAlunos && d.totalAlunos > 0) {
-          var totalLocal = ALUNOS.length;
+          var totalLocal = totalBasesLocal();
           var totalServidor = parseInt(d.totalAlunos) || 0;
-          // Recarregar se local vazio OU quantidade diferente (não só maior)
-          if((totalLocal === 0 || totalServidor !== totalLocal) && !window._recarregandoBase) {
+          // Com ciclos: compara ciclo a ciclo (só os que existem no servidor)
+          var baseDiferente = totalLocal === 0 || totalServidor !== totalLocal;
+          if(d.totaisCiclo) {
+            baseDiferente = Object.keys(d.totaisCiclo).some(function(c) {
+              var n = parseInt(d.totaisCiclo[c]) || 0;
+              return n > 0 && (!BASES[c] || BASES[c].length !== n);
+            });
+          }
+          if(baseDiferente && !window._recarregandoBase) {
             window._recarregandoBase = true;
             console.log('[SYNC] Base desatualizada: local=' + totalLocal + ' servidor=' + totalServidor + '. Recarregando...');
             mostrarToast('📥 Base atualizada por outro atendente. Recarregando...');
@@ -5553,18 +5872,17 @@ function iniciarRealtime() {
                   d2.alunos.forEach(function(a) {
                     a.id              = String(a.id);
                     a.acionamentos    = [];
-                    a.cpfDigitado     = a.cpf || '';
-                    a.celularOriginal = String(a.telefone||'').replace('+55','');
-                    a.divTotal        = parseFloat(a.divTotal) || 0;
-                    a.formando        = a.formando === true || a.formando === 'S';
-                    a.faixaDivida     = a.faixaDivida === '0' ? 'Sem dívida' : (a.faixaDivida||'');
-                    if(window._statusPendente && window._statusPendente[a.id]) {
-                      a.status = window._statusPendente[a.id];
+                    if(!a._full) {
+                      a.cpfDigitado     = a.cpf || '';
+                      a.celularOriginal = String(a.telefone||'').replace('+55','');
+                      a.divTotal        = parseFloat(a.divTotal) || 0;
+                      a.formando        = a.formando === true || a.formando === 'S';
+                      a.faixaDivida     = a.faixaDivida === '0' ? 'Sem dívida' : (a.faixaDivida||'');
                     }
                     novaBase.push(a);
                   });
-                  ALUNOS.length = 0;
-                  novaBase.forEach(function(a){ ALUNOS.push(a); });
+                  aplicarBasesServidor(novaBase);
+                  try { sincronizarStatusAlunos(); } catch(ex) {}
                   window._statusPendente = {};
                   salvarDados();
                   mostrarToast('&#10003; Base atualizada: ' + ALUNOS.length + ' alunos.');
@@ -5794,6 +6112,7 @@ function drenaFila() {
 }
 
 function pushAcionamentoGAS(acionamento) {
+  if(acionamento && !acionamento.ciclo) acionamento.ciclo = S.periodo;
   var gasUrl = localStorage.getItem('gasUrl');
   if(!gasUrl) {
     console.warn('[PUSH] GAS nao configurado — acionamento salvo apenas localmente');
@@ -5834,6 +6153,7 @@ function pushAcionamentoGAS(acionamento) {
 
 // Enviar envio para o GAS
 function pushEnvioGAS(envio) {
+  if(envio && !envio.ciclo) envio.ciclo = S.periodo;
   var gasUrl = localStorage.getItem('gasUrl');
   if(!gasUrl) return;
   gasPost('registrar_envio', { envio: envio })
@@ -6596,7 +6916,7 @@ function migrarAutomatico() {
             id: ac.id, alunoId: String(ac.alunoId||''), nomeAluno: ac.nomeAluno||'',
             colab: ac.colab||'', tipo: ac.tipo||'', obs: ac.obs||'',
             fuData: ac.fuData||'', fuTipo: ac.fuTipo||'', fuPara: ac.fuPara||ac.colab||'', stAl: ac.stAl||'',
-            data: ac.data||'', hora: ac.hora||'', _ts: ac._ts||ac.id||Date.now(),
+            data: ac.data||'', hora: ac.hora||'', _ts: ac._ts||ac.id||Date.now(), ciclo: ac.ciclo||cicloDoAc(ac),
           }}).then(function(){
             return new Promise(function(r){ setTimeout(r, 150); });
           });
