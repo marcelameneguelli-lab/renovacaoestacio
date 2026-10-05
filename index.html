@@ -862,12 +862,43 @@ var BASES = {};
     if(cfg.metaFinal) S.metaFinal = parseInt(cfg.metaFinal) || S.metaFinal;
   }
   localStorage.setItem('periodo', S.periodo);
+  setTimeout(function(){ try { if(sanearBases()) { salvarDados(); renderSeletorCiclo(); } } catch(e) {} }, 0);
 })();
 
 function definirBaseCiclo(c, lista) {
   BASES[c] = lista;
   if(c === S.periodo) ALUNOS = lista;
   _idxCiclos = null;
+  sanearBases();
+}
+// Garante que cada ciclo só tenha alunos daquele ciclo. Se algum aluno de
+// outro ciclo estiver misturado (cache antigo, sincronização), ele é movido
+// para a base certa. Evita somar ÍMPAR + PAR na mesma tela.
+function sanearBases() {
+  var movidos = 0;
+  Object.keys(BASES).forEach(function(c) {
+    var lista = BASES[c];
+    if(!lista || !lista.length) return;
+    var fica = [];
+    lista.forEach(function(a) {
+      var ca = normCiclo(a && a.ciclo);
+      if(!ca || ca === c) { if(a && !a.ciclo) a.ciclo = c; fica.push(a); return; }
+      movidos++;
+      if(!BASES[ca]) BASES[ca] = [];
+      if(!BASES[ca].some(function(x){ return String(x.id) === String(a.id); })) BASES[ca].push(a);
+    });
+    if(fica.length !== lista.length) { lista.length = 0; fica.forEach(function(a){ lista.push(a); }); }
+  });
+  // Mesmo aluno repetido dentro do mesmo ciclo: mantém um só
+  Object.keys(BASES).forEach(function(c) {
+    var lista = BASES[c]; if(!lista || !lista.length) return;
+    var vistos = {}, fica = [];
+    lista.forEach(function(a){ var k = String(a.id); if(vistos[k]) { movidos++; return; } vistos[k] = 1; fica.push(a); });
+    if(fica.length !== lista.length) { lista.length = 0; fica.forEach(function(a){ lista.push(a); }); }
+  });
+  if(movidos) { _idxCiclos = null; console.warn('[CICLO] ' + movidos + ' aluno(s) fora do ciclo certo foram reorganizados.'); }
+  ALUNOS = BASES[S.periodo] || ALUNOS;
+  return movidos;
 }
 // Recebe alunos do servidor (todos os ciclos) e distribui em BASES
 function aplicarBasesServidor(lista) {
@@ -885,6 +916,7 @@ function aplicarBasesServidor(lista) {
   });
   if(novo[localStorage.getItem('bases_legado')]) localStorage.removeItem('bases_legado');
   if(!BASES[S.periodo]) definirBaseCiclo(S.periodo, []);
+  sanearBases();
   ALUNOS = BASES[S.periodo];
   try { renderSeletorCiclo(); } catch(e) {}
 }
@@ -1727,6 +1759,7 @@ function carregarMetasCategoriasGAS() {
 }
 
 function rDash() {
+  sanearBases();
   sincronizarStatusAlunos();      // mesmo critério do gráfico: CSV "ALUNO RENOVADO" conta sempre
   registrarSnapshotRenovados();   // alimenta o ritmo real diário
   // Período único ativo
