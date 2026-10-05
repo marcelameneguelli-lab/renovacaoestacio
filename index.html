@@ -1225,6 +1225,14 @@ Equipe Estácio Volta Redonda` }
 };
 
 function pNome(n) { return (n||'').split(' ')[0].charAt(0).toUpperCase()+(n||'').split(' ')[0].slice(1).toLowerCase(); }
+// Percentual com 2 casas, cortando (nunca arredonda para cima): 593/595 = 99,66%
+function pct2(parte, total) {
+  if(!total) return 0;
+  return Math.floor(parte / total * 10000) / 100;
+}
+function fmtPct(v) {
+  return Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}) + '%';
+}
 function fmtVal(v) { return Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 
 // ═══════════════════════════════════════════
@@ -1453,8 +1461,8 @@ function calcCurvaStats(periodoNome) {
     const metaDia  = (ultimo && proxMeta) ? Math.max(0, Math.round((proxMeta.metaRen - ultimo.metaRen)*10)/10) : 0;
     const gapAtual = ultimo?.gap ?? 0;
     const renAtual = ultimo?.renAtual ?? 0;
-    const pctAtual = ultimo ? Math.round((ultimo.pctAtual||0)*100) : 0;
-    const metaPct  = ultimo ? Math.round((ultimo.metaPct||0)*100) : 0;
+    const pctAtual = ultimo ? Math.floor((ultimo.pctAtual||0)*10000)/100 : 0;
+    const metaPct  = ultimo ? Math.floor((ultimo.metaPct||0)*10000)/100 : 0;
     // Guard contra curva antiga salva no localStorage com dados corrompidos
     // (de antes da validação de importação existir) — evita mostrar "73000%"
     if(pctAtual > 300 || metaPct > 300 || pctAtual < 0 || metaPct < 0) {
@@ -1773,7 +1781,7 @@ function rDash() {
   const pen  = alunosPer.filter(a=>a.status==='Pendente').length;
   const eva  = alunosPer.filter(a=>a.status==='Evadido').length;
   const tot  = alunosPer.length;
-  const tx   = tot ? Math.round(ren/tot*100) : 0;
+  const tx   = fmtPct(pct2(ren, tot));
 
   // Curvas
   const cv = calcCurvaStats(perSel);
@@ -1828,7 +1836,7 @@ function rDash() {
         const temMetaCurva = metaCurva != null && metaCurva > 0;
         const meta = temMetaManual ? metaManual : (temMetaCurva ? metaCurva : Math.round(S.metaFinal * (g.total / totalBase)));
         // Arredonda para baixo: 593/595 é 99%, não 100%. Só mostra 100% quando bateu a meta.
-        const pct = meta > 0 ? Math.floor(g.renovados / meta * 100) : (g.renovados>0?100:0);
+        const pct = meta > 0 ? pct2(g.renovados, meta) : (g.renovados>0?100:0);
         return { nome, total: g.total, renovados: g.renovados, meta, pct: Math.min(pct,999), temMetaManual: temMetaManual || temMetaCurva, deCurva: temMetaCurva };
       })
       .filter(g => g.total > 0)
@@ -1837,7 +1845,7 @@ function rDash() {
 
   function miniMetaCard(item, cor) {
     const pctBar = Math.min(100, item.pct);
-    const corBarra = item.pct >= 100 ? '#1E8449' : item.pct >= 70 ? '#D68910' : '#C0392B';
+    const corBarra = item.renovados >= item.meta ? '#1E8449' : item.pct >= 70 ? '#D68910' : '#C0392B';
     return `<div style="background:#fff;border:1px solid var(--cbr);border-radius:9px;padding:10px 12px;min-width:150px;flex:1">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
         <strong style="font-size:12px;color:${cor}">${item.nome}</strong>
@@ -1845,7 +1853,7 @@ function rDash() {
       </div>
       <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
         <span>${item.renovados} / <strong>${item.meta}</strong> meta${item.deCurva?' <span title="Meta vinda da curva de renovação importada" style="color:var(--vd);font-size:10px">&#128200; curva</span>':(item.temMetaManual?'':' <span title="Meta estimada proporcionalmente — defina uma meta fixa em Configurações" style="color:var(--la)">~</span>')}${item.renovados < item.meta ? ` <span style="color:var(--vm);font-size:11px;font-weight:700">· faltam ${item.meta - item.renovados}</span>` : ''}</span>
-        <span style="font-weight:700;color:${corBarra}">${item.pct}%</span>
+        <span style="font-weight:700;color:${corBarra}">${item.pct >= 999 ? '999%+' : fmtPct(item.pct)}</span>
       </div>
       <div class="prg" style="height:6px"><div class="pb" style="width:${pctBar}%;background:${corBarra}"></div></div>
     </div>`;
@@ -1863,8 +1871,8 @@ function buCard(label, emoji, color, st) {
         <div class="bu-row"><span class="lb">Meta dia</span><span class="vl" style="color:var(--azm)">${st.metaDia}</span></div>
         <div class="bu-row"><span class="lb">Gap hoje</span><span class="vl" style="color:${gapColor}">${gapSinal}${st.gapAtual}</span></div>
         <div class="bu-row"><span class="lb">Meta fechamento</span><span class="vl">${Math.round(st.metaFech)}</span></div>
-        <div class="bu-row"><span class="lb">Taxa atual</span><span class="vl">${st.pctAtual}%</span></div>
-        <div class="bu-row"><span class="lb">Meta %</span><span class="vl">${st.metaPct}%</span></div>
+        <div class="bu-row"><span class="lb">Taxa atual</span><span class="vl">${fmtPct(st.pctAtual)}</span></div>
+        <div class="bu-row"><span class="lb">Meta %</span><span class="vl">${fmtPct(st.metaPct)}</span></div>
       </div>
       <div style="margin-top:10px">
         <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--ct);margin-bottom:4px">
@@ -1884,7 +1892,7 @@ function buCard(label, emoji, color, st) {
 </div>
 
 <div class="cms">
-  <div class="cm vd"><div class="lb">Renovados</div><div class="vl">${ren}</div><div class="sb2">${tx}% de conversão</div></div>
+  <div class="cm vd"><div class="lb">Renovados</div><div class="vl">${ren}</div><div class="sb2">${tx} de conversão</div></div>
   <div class="cm la"><div class="lb">Em negociação</div><div class="vl">${neg}</div><div class="sb2">Acompanhar</div></div>
   <div class="cm"><div class="lb">Pendentes</div><div class="vl">${pen}</div><div class="sb2">Acionar agora</div></div>
   <div class="cm vm"><div class="lb">Evadidos</div><div class="vl">${eva}</div><div class="sb2">Monitorar</div></div>
@@ -1895,7 +1903,7 @@ function buCard(label, emoji, color, st) {
 <div style="background:#fff;border:1px solid var(--cbr);border-radius:10px;padding:13px 15px;margin-bottom:14px;box-shadow:var(--sh)">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px">
     <span style="font-size:11px;color:var(--ct);font-weight:700;text-transform:uppercase">Progresso Geral · ${perSel} · Meta Fechamento</span>
-    <span style="font-size:13px;font-weight:700;color:var(--az)">${ren}/${metaFinal}</span>
+    <span style="font-size:13px;font-weight:700;color:var(--az)">${ren}/${metaFinal} · ${fmtPct(pct2(ren, metaFinal))}</span>
   </div>
   <div class="prg"><div class="pb vd" style="width:${metaFinal?Math.min(100,Math.round(ren/metaFinal*100)):0}%"></div></div>
 </div>
