@@ -746,6 +746,9 @@ function normCiclo(p) {
   p = String(p == null ? '' : p).trim().replace(',', '.');
   var m = p.match(/^(\d{2})\.(\d)$/);
   if(m) return '20' + m[1] + '.' + m[2];
+  // Planilha em português transforma "2026.3" em 20263 (ponto vira separador de milhar)
+  m = p.match(/^(20\d{2})(\d)$/);
+  if(m) return m[1] + '.' + m[2];
   m = p.match(/^(20\d{2})\.(\d)/);
   if(m) return m[1] + '.' + m[2];
   return p;
@@ -918,6 +921,12 @@ function aplicarBasesServidor(lista) {
   if(!BASES[S.periodo]) definirBaseCiclo(S.periodo, []);
   sanearBases();
   ALUNOS = BASES[S.periodo];
+  // Ciclo selecionado ficou sem base, mas outro ciclo tem: abre o mais recente com base
+  if(!ALUNOS.length) {
+    var comBase = Object.keys(BASES).filter(function(c){ return BASES[c] && BASES[c].length; }).sort();
+    var alvo = comBase.filter(cicloAberto).pop() || comBase.pop();
+    if(alvo && alvo !== S.periodo) { trocarCiclo(alvo, true); mostrarToast('Ciclo ' + S.periodo + ' sem base. Abrindo o ciclo ' + alvo + '.'); }
+  }
   try { renderSeletorCiclo(); } catch(e) {}
 }
 
@@ -5985,7 +5994,7 @@ function iniciarRealtime() {
                   try { sincronizarStatusAlunos(); } catch(ex) {}
                   window._statusPendente = {};
                   salvarDados();
-                  mostrarToast('&#10003; Base atualizada: ' + ALUNOS.length + ' alunos.');
+                  mostrarToast('&#10003; Base atualizada: ' + Object.keys(BASES).filter(function(c){return BASES[c]&&BASES[c].length;}).map(function(c){ return c + ' = ' + BASES[c].length; }).join(' · '));
                   if(!algumModalAberto()) {
                     try { checkAlertas(); rDash(); } catch(ex) {}
                     if(document.getElementById('nd-alunos')) {
