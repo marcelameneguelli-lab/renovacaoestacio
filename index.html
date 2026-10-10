@@ -399,6 +399,8 @@ window.addEventListener('unhandledrejection', function(e) {
     <a onclick="ir('renovados')">✅ Hist&#xF3;rico</a>
     <a onclick="ir('relatorios')">📊 Relat&#xF3;rios</a>
     <a onclick="ir('evasao')">🚪 Evas&#xE3;o</a>
+    <a onclick="ir('boasvindas')">🎉 Boas-vindas <span id="nd-bv" style="display:none;background:#1E8449;color:#fff;border-radius:10px;padding:0 7px;font-size:10px;font-weight:700;margin-left:4px"></span></a>
+    <a onclick="window.open(RECUPERA_URL,'recupera')" title="Portal de Negociação (SIA)">💳 Recupera</a>
     <a onclick="ir('produtividade')">👥 Produtividade</a>
     <a onclick="ir('config')" id="menu-config"><span class="ic"><i class="fa fa-cog"></i></span> Configura&#xE7;&#xF5;es</a>
     <a onclick="abrirAdmin()" id="menu-admin" style="display:none">🔐 Admin</a>
@@ -468,6 +470,7 @@ window.addEventListener('unhandledrejection', function(e) {
     <div id="tela-renovados" style="display:none"></div>
     <div id="tela-relatorios" style="display:none"></div>
     <div id="tela-evasao" style="display:none"></div>
+    <div id="tela-boasvindas" style="display:none"></div>
     <div id="tela-produtividade" style="display:none"></div>
     <div id="tela-config" style="display:none"></div>
   </div>
@@ -485,6 +488,7 @@ window.addEventListener('unhandledrejection', function(e) {
       <button class="btn bwa" onclick="envioRapido('wpp')">WPP WhatsApp</button>
       <button class="btn bem" onclick="envioRapido('email')">&#x2709;&#xFE0F; E-mail</button>
       <button class="btn bsm" onclick="envioRapido('sms')">SMS SMS</button>
+      <button class="btn bs" onclick="abrirRecupera()" title="Abre o Portal de Negociação e copia a matrícula">💳 Recupera</button>
       <button class="btn bv" onclick="salvarAcionamento()"> Registrar</button>
     </div>
   </div>
@@ -954,7 +958,7 @@ function trocarCiclo(c, silencioso) {
   }
   var t = window._telaAtiva || 'dash';
   try {
-    var fn = {dash:rDash,alunos:rAlunos,followup:rFollowup,produtividade:rProdutividade,evasao:rEvasao,config:function(){ rConfig(); anexarConfigObjecoes(); },importar:rImportar,renovados:rRenovados,relatorios:rRelatorios,envios:rEnvios}[t];
+    var fn = {dash:rDash,alunos:rAlunos,followup:rFollowup,produtividade:rProdutividade,evasao:rEvasao,boasvindas:rBoasVindas,config:function(){ rConfig(); anexarConfigObjecoes(); },importar:rImportar,renovados:rRenovados,relatorios:rRelatorios,envios:rEnvios}[t];
     if(fn) fn(); else rDash();
   } catch(e) { console.warn('[CICLO] render:', e.message); }
   try { checkAlertas(); } catch(e) {}
@@ -1260,15 +1264,15 @@ function fmtVal(v) { return Number(v||0).toLocaleString('pt-BR',{minimumFraction
 // ═══════════════════════════════════════════
 //  NAVEGAÇÃO
 // ═══════════════════════════════════════════
-const TELAS = ['dash','alunos','envios','followup','importar','renovados','relatorios','evasao','produtividade','config'];
-const TITULOS = {dash:'Dashboard',alunos:'Lista de Alunos',envios:'Central de Envios',followup:'Follow-Up',importar:'Importar Base',renovados:'Historico',relatorios:'Relatorios de Acionamentos',evasao:'Relatório de Evasão',produtividade:'Produtividade',config:'Configuracoes'};
+const TELAS = ['dash','alunos','envios','followup','importar','renovados','relatorios','evasao','boasvindas','produtividade','config'];
+const TITULOS = {dash:'Dashboard',alunos:'Lista de Alunos',envios:'Central de Envios',followup:'Follow-Up',importar:'Importar Base',renovados:'Historico',relatorios:'Relatorios de Acionamentos',evasao:'Relatório de Evasão',boasvindas:'Boas-vindas aos Renovados',produtividade:'Produtividade',config:'Configuracoes'};
 function ir(t) {
   TELAS.forEach(x=>document.getElementById('tela-'+x).style.display='none');
   document.getElementById('tela-'+t).style.display='block';
   document.querySelectorAll('#sb nav a').forEach(el=>{el.classList.remove('on');if((el.getAttribute('onclick')||'')==="ir('"+t+"')")el.classList.add('on')});
   document.getElementById('ttl').textContent = TITULOS[t];
   window._telaAtiva = t;
-  const fn = {dash:rDash,alunos:rAlunos,envios:rEnvios,followup:rFollowup,importar:rImportar,renovados:rRenovados,relatorios:rRelatorios,evasao:rEvasao,produtividade:rProdutividade,config:function(){ rConfig(); anexarConfigObjecoes(); }}[t];
+  const fn = {dash:rDash,alunos:rAlunos,envios:rEnvios,followup:rFollowup,importar:rImportar,renovados:rRenovados,relatorios:rRelatorios,evasao:rEvasao,boasvindas:rBoasVindas,produtividade:rProdutividade,config:function(){ rConfig(); anexarConfigObjecoes(); }}[t];
   try { if(fn) fn(); } catch(e) { console.error('[ir] erro em r'+t+'():', e.message, e.stack); }
   try { checkAlertas(); } catch(e) { console.error('[ir] checkAlertas:', e); }
   // Ao abrir followup ou dash, forçar sync imediato para dados frescos
@@ -1431,6 +1435,7 @@ function checkAlertas() {
     }
   }
 
+  try { atualizarBadgeBv(); } catch(e) {}
   // Badge no menu sempre atualiza independente da tela
   const ndFu = document.getElementById('nd-fu');
   if(ndFu) ndFu.style.display = tot > 0 ? 'inline-block' : 'none';
@@ -1580,6 +1585,8 @@ function carregarConfigGeralGAS() {
   gasGet('config').then(function(cfg) {
     if(cfg && cfg[histRenKey()] && mesclarHistRen(cfg[histRenKey()]) && window._telaAtiva === 'dash') { try { rDash(); } catch(e){} }
     if(cfg && cfg.objecoes_lista) mesclarObjecoesRemotas(cfg.objecoes_lista);
+    if(cfg && cfg.bv_tpl) { try { if(cfg.bv_tpl !== localStorage.getItem('bv_tpl')) localStorage.setItem('bv_tpl', cfg.bv_tpl); } catch(e) {} }
+    if(cfg && cfg[bvKey()] && mesclarBv(cfg[bvKey()])) { try { atualizarBadgeBv(); if(window._telaAtiva==='boasvindas') rBoasVindas(); } catch(e) {} }
     if(cfg && cfg.fu_concluidos && mesclarFuConcluidos(cfg.fu_concluidos)) {
       try { checkAlertas(); } catch(e){}
       if(window._telaAtiva === 'followup') { try { rFollowup(); } catch(e){} }
@@ -6347,7 +6354,13 @@ function loteAplicar(txt, a) {
     .replace(/\{prazo\}/gi, S.prazo || '')
     .replace(/\{valor\}/gi, fmtVal(a.vaValor || a.divMens))
     .replace(/\{divida\}/gi, fmtVal(a.divTotal))
-    .replace(/\{atendente\}/gi, S.colab || '');
+    .replace(/\{atendente\}/gi, S.colab || '')
+    .replace(/\{ciclo\}/gi, S.periodo || '')
+    .replace(/\{inicio_aulas\}/gi, (getCicloCfg()[S.periodo]||{}).bvInicio || '')
+    .replace(/\{venc_dia\}/gi, (getCicloCfg()[S.periodo]||{}).bvVencDia || '')
+    .replace(/\{primeiro_venc\}/gi, (getCicloCfg()[S.periodo]||{}).bvPrimeiroVenc || '')
+    .replace(/\{link_calendario\}/gi, (getCicloCfg()[S.periodo]||{}).bvLinkCal || '')
+    .replace(/\{link_financeiro\}/gi, (getCicloCfg()[S.periodo]||{}).bvLinkFin || '');
 }
 // Converte um modelo existente (função por aluno) em texto com variáveis editáveis
 function loteModeloParaTexto(fn) {
@@ -6442,6 +6455,17 @@ ${c==='email' ? `<div class="fg" style="margin-top:10px"><div class="lb" style="
 <button class="btn bs" onclick="fecharEnvioLote()">Cancelar</button>
 <button class="btn ${c==='wpp'?'bwa':'bem'}" onclick="loteIniciar()">${c==='wpp'?'▶ Iniciar fila do WhatsApp':'⬇ Gerar planilha para mala direta'}</button>`;
   var sel = document.getElementById('lote-tpl');
+  if(LOTE.preset) {
+    // Boas-vindas: mensagem pronta, todos são renovados (não excluir)
+    var ex = document.getElementById('lote-exc-ren'); if(ex) { ex.checked = false; ex.parentNode.style.display = 'none'; }
+    if(sel) sel.value = '';
+    document.getElementById('lote-msg').value = c === 'wpp' ? LOTE.preset.wpp : LOTE.preset.email;
+    var asB = document.getElementById('lote-assunto'); if(asB) asB.value = LOTE.preset.assunto;
+    document.getElementById('lote-filtro-txt').textContent = 'Boas-vindas · ' + LOTE.base.length + ' renovados do ciclo ' + S.periodo + ' que ainda não receberam';
+    document.getElementById('m-lote-titulo').textContent = '🎉 Boas-vindas · ' + LOTE.base.length + ' renovados';
+    loteAtualizarResumo();
+    return;
+  }
   if(tpls.length && sel) { sel.value = tpls[0].id; loteCarregarModelo(); } else loteAtualizarResumo();
 }
 function loteTrocarCanal(c) {
@@ -6449,6 +6473,7 @@ function loteTrocarCanal(c) {
   var tplAtual = document.getElementById('lote-tpl')?.value || '';
   LOTE.canal = c;
   renderLoteConfig();
+  if(LOTE.preset) return;
   // mantém o texto livre que a pessoa já tinha escrito
   if(!tplAtual && msgAtual) {
     document.getElementById('lote-tpl').value = '';
@@ -6498,6 +6523,7 @@ function loteAtualizarPreview() {
 }
 
 function loteRegistrar(a, canal, msg, tplNome) {
+  if(LOTE && LOTE.bv) { try { marcarBoasVindas([a.id]); } catch(e) {} }
   var ts = Date.now() * 10 + Math.floor(Math.random()*10);
   var hoje = new Date().toLocaleDateString('pt-BR');
   var hora = new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
@@ -6518,7 +6544,7 @@ function loteIniciar() {
   var selTpl = document.getElementById('lote-tpl');
   LOTE.msg = msg;
   LOTE.assunto = (document.getElementById('lote-assunto')?.value || '').trim() || '[Estácio] Renovação de Matrícula';
-  LOTE.tplNome = selTpl && selTpl.value ? selTpl.options[selTpl.selectedIndex].text : 'Mensagem livre';
+  LOTE.tplNome = LOTE.preset ? LOTE.preset.tplNome : (selTpl && selTpl.value ? selTpl.options[selTpl.selectedIndex].text : 'Mensagem livre');
   LOTE.fila = r.validos; LOTE.idx = 0; LOTE.ok = 0; LOTE.erro = 0; LOTE.pulados = 0; LOTE.erros = [];
   var pend = (LOTE.msg + ' ' + LOTE.assunto).match(/X{3,}|\[LINK[^\]]*\]|\[[A-ZÇÃÕÁÉÍÓÚ ]{6,}\]/g);
   if(pend && !confirm('A mensagem ainda tem trechos para preencher:\n\n' + pend.join('\n') + '\n\nContinuar mesmo assim?')) return;
@@ -7007,6 +7033,197 @@ function salvarObjecoesCfg() {
   if(!l.length) { mostrarToast('A lista não pode ficar vazia.'); return; }
   salvarObjecoes(l);
   mostrarToast('&#10003; Lista de objeções salva para toda a equipe.');
+}
+
+
+// ═══════════════════════════════════════════
+//  RECUPERA (Portal de Negociação no SIA)
+// ═══════════════════════════════════════════
+const RECUPERA_URL = 'http://siaadm.estacio.rj.br/sianet/Adm/AdministracaoFinanceira/Cobranca/PortalExterno/Redirect?funcao=FIN1-3-12-9-5&modulo=8&titulo=Portal%24de%24Negocia%E7%E3o&hlp=';
+function abrirRecupera(aluno) {
+  var a = aluno || alunoSel;
+  if(a && a.matricula) {
+    try { navigator.clipboard.writeText(String(a.matricula)); mostrarToast('Matrícula ' + a.matricula + ' copiada. Cole no Recupera (Ctrl+V).'); } catch(e) {}
+  }
+  window.open(RECUPERA_URL, 'recupera');
+}
+
+// ═══════════════════════════════════════════
+//  BOAS-VINDAS AOS RENOVADOS
+//  Fila automática: todo aluno que fica "Renovado" no ciclo e ainda não
+//  recebeu a mensagem entra na fila. O envio usa o Envio em lote
+//  (WhatsApp em fila ou mala direta do Outlook institucional).
+// ═══════════════════════════════════════════
+const BV_TPL_PADRAO = {
+  wpp: 'Olá, {nome}! 🎉\n\n'
+     + 'Sua matrícula no curso de *{curso}* está renovada para o semestre *{ciclo}*. Seja muito bem-vindo(a) de volta à *Estácio Volta Redonda*!\n\n'
+     + '📅 *Calendário acadêmico*\nAs aulas começam em *{inicio_aulas}*. Confira todas as datas do semestre (provas, prazos e feriados) em: {link_calendario}\n\n'
+     + '💰 *Calendário financeiro*\nO valor do semestre (semestralidade) é dividido em parcelas mensais, com vencimento todo dia *{venc_dia}*. A primeira parcela do novo semestre vence em *{primeiro_venc}*.\n\n'
+     + '⚠️ *Atenção à sobreposição de mensalidades*\nSe ainda houver alguma parcela do semestre anterior em aberto, ela pode vencer no mesmo mês da primeira parcela do novo semestre, e você teria duas cobranças juntas. Para evitar isso, mantenha os pagamentos em dia ou fale com a gente para negociar com antecedência.\n\n'
+     + 'Qualquer dúvida, é só responder esta mensagem. Ótimo semestre! 📚\n'
+     + 'Equipe de Relacionamento · Estácio Volta Redonda',
+  assunto: 'Bem-vindo(a) ao semestre {ciclo} · Estácio Volta Redonda',
+  email: 'Olá, {nome}!\n\n'
+     + 'Sua matrícula no curso de {curso} está renovada para o semestre {ciclo}. Seja muito bem-vindo(a) de volta à Estácio Volta Redonda!\n\n'
+     + 'CALENDÁRIO ACADÊMICO\nAs aulas começam em {inicio_aulas}. Confira todas as datas do semestre (provas, prazos e feriados) em: {link_calendario}\n\n'
+     + 'CALENDÁRIO FINANCEIRO\nO valor do semestre (semestralidade) é dividido em parcelas mensais, com vencimento todo dia {venc_dia}. A primeira parcela do novo semestre vence em {primeiro_venc}.\n\n'
+     + 'ATENÇÃO À SOBREPOSIÇÃO DE MENSALIDADES\nSe ainda houver alguma parcela do semestre anterior em aberto, ela pode vencer no mesmo mês da primeira parcela do novo semestre, gerando duas cobranças juntas. Para evitar isso, mantenha os pagamentos em dia ou procure a equipe de Relacionamento para negociar com antecedência. Consulte e regularize pendências em: {link_financeiro}\n\n'
+     + 'Estamos à disposição. Ótimo semestre!\n\n'
+     + 'Atenciosamente,\nEquipe de Relacionamento · Estácio Volta Redonda',
+};
+function getBvTpl() {
+  try { var t = JSON.parse(localStorage.getItem('bv_tpl') || 'null'); if(t && t.wpp) return t; } catch(e) {}
+  return Object.assign({}, BV_TPL_PADRAO);
+}
+function salvarBvTpl(t) {
+  localStorage.setItem('bv_tpl', JSON.stringify(t));
+  if(localStorage.getItem('gasUrl')) gasPost('salvar_config', { chave: 'bv_tpl', valor: JSON.stringify(t) }).catch(function(){});
+}
+function bvKey(c) { return 'bv_' + (c || S.periodo); }
+function getBvSet(c) {
+  try { return new Set((JSON.parse(localStorage.getItem(bvKey(c)) || '[]') || []).map(String)); } catch(e) { return new Set(); }
+}
+function salvarBvSet(set, c, sincronizar) {
+  var arr = Array.from(set);
+  localStorage.setItem(bvKey(c), JSON.stringify(arr));
+  if(sincronizar !== false && localStorage.getItem('gasUrl')) {
+    gasGet('config').then(function(cfg) {
+      if(cfg && cfg[bvKey(c)]) mesclarBv(cfg[bvKey(c)], c);
+    }).catch(function(){}).then(function() {
+      return gasPost('salvar_config', { chave: bvKey(c), valor: JSON.stringify(Array.from(getBvSet(c))) });
+    }).catch(function(){});
+  }
+}
+function mesclarBv(txt, c) {
+  try {
+    var set = getBvSet(c), mudou = false;
+    (JSON.parse(txt || '[]') || []).forEach(function(id){ id = String(id); if(!set.has(id)) { set.add(id); mudou = true; } });
+    if(mudou) localStorage.setItem(bvKey(c), JSON.stringify(Array.from(set)));
+    return mudou;
+  } catch(e) { return false; }
+}
+function marcarBoasVindas(ids, c) {
+  var set = getBvSet(c);
+  ids.forEach(function(id){ set.add(String(id)); });
+  salvarBvSet(set, c);
+  atualizarBadgeBv();
+}
+function filaBoasVindas() {
+  try { sincronizarStatusAlunos(); } catch(e) {}
+  var set = getBvSet();
+  return ALUNOS.filter(function(a){ return a.status === 'Renovado' && !set.has(String(a.id)); });
+}
+function atualizarBadgeBv() {
+  var n = 0;
+  try { n = filaBoasVindas().length; } catch(e) {}
+  var el = document.getElementById('nd-bv');
+  if(el) { el.textContent = n; el.style.display = n ? 'inline-block' : 'none'; }
+  // aviso quando chegam novos renovados
+  var k = 'bv_ultimo_n_' + S.periodo;
+  var antes = parseInt(localStorage.getItem(k) || '-1');
+  if(antes >= 0 && n > antes) mostrarToast('🎉 ' + (n - antes) + ' novo(s) renovado(s) aguardando boas-vindas.');
+  localStorage.setItem(k, String(n));
+  return n;
+}
+
+function rBoasVindas() {
+  var fila = filaBoasVindas();
+  var cfg = getCicloCfg()[S.periodo] || {};
+  var t = getBvTpl();
+  var enviados = getBvSet().size;
+  var semTel = fila.filter(function(a){ return !loteTel(a); }).length;
+  var semEmail = fila.filter(function(a){ return !String(a.email||'').includes('@'); }).length;
+  var esc = function(s){ return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); };
+  var faltaCfg = !cfg.bvInicio || !cfg.bvVencDia || !cfg.bvPrimeiroVenc || !cfg.bvLinkCal;
+  document.getElementById('tela-boasvindas').innerHTML = `
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:14px">
+  <div class="cm vd"><div class="lb">Aguardando boas-vindas</div><div class="vl">${fila.length}</div><div class="sb2">renovados do ciclo ${S.periodo}</div></div>
+  <div class="cm"><div class="lb">Já receberam</div><div class="vl">${enviados}</div><div class="sb2">neste ciclo</div></div>
+  <div class="cm"><div class="lb">Sem celular / e-mail</div><div class="vl" style="font-size:20px">${semTel} / ${semEmail}</div><div class="sb2">na fila</div></div>
+</div>
+
+<div class="tw" style="padding:14px 16px;margin-bottom:14px">
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    <strong style="font-size:14px">Enviar para os ${fila.length} renovados da fila</strong>
+    <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn bwa" onclick="abrirLoteBoasVindas('wpp')" ${fila.length?'':'disabled'}>💬 WhatsApp (fila)</button>
+      <button class="btn bem" onclick="abrirLoteBoasVindas('email')" ${fila.length?'':'disabled'}>✉️ E-mail (Outlook)</button>
+      <button class="btn bs" onclick="bvMarcarTodos()" ${fila.length?'':'disabled'} title="Tira todos da fila sem enviar. Use uma vez para começar só com os próximos renovados.">✓ Marcar todos como já recebidos</button>
+    </span>
+  </div>
+  <p style="font-size:12px;color:var(--ct);margin-top:8px">A fila se atualiza sozinha: sempre que um aluno aparece como <strong>Renovado</strong> (pela base ou por acionamento), ele entra aqui e o menu mostra o número. Quem recebe sai da fila para toda a equipe.</p>
+  ${faltaCfg ? '<p style="font-size:12px;color:var(--vm);font-weight:700;margin-top:6px">&#9888;️ Preencha as datas e o link do calendário abaixo antes de enviar.</p>' : ''}
+</div>
+
+<div class="tw" style="padding:14px 16px;margin-bottom:14px">
+  <h3 style="font-size:14px;margin-bottom:10px">📅 Dados do semestre ${S.periodo}</h3>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px">
+    <div class="fg"><label>Início das aulas</label><input type="date" id="bv-inicio" value="${prazoParaInput(cfg.bvInicio||'')}"></div>
+    <div class="fg"><label>Dia de vencimento das mensalidades</label><input type="number" min="1" max="31" id="bv-venc" value="${esc(cfg.bvVencDia||'')}" placeholder="Ex: 10"></div>
+    <div class="fg"><label>1ª parcela do novo semestre vence em</label><input type="date" id="bv-primeiro" value="${prazoParaInput(cfg.bvPrimeiroVenc||'')}"></div>
+    <div class="fg"><label>Link do calendário acadêmico</label><input id="bv-linkcal" value="${esc(cfg.bvLinkCal||'')}" placeholder="https://..."></div>
+    <div class="fg"><label>Link para consultar/pagar (financeiro)</label><input id="bv-linkfin" value="${esc(cfg.bvLinkFin||'')}" placeholder="https://..."></div>
+  </div>
+  <button class="btn bp bpq" style="margin-top:8px" onclick="salvarBvCfg()">Salvar dados do semestre</button>
+</div>
+
+<div class="tw" style="padding:14px 16px;margin-bottom:14px">
+  <h3 style="font-size:14px;margin-bottom:4px">✍️ Mensagens de boas-vindas</h3>
+  <p style="font-size:12px;color:var(--ct);margin-bottom:8px">Variáveis: {nome} {curso} {ciclo} {inicio_aulas} {venc_dia} {primeiro_venc} {link_calendario} {link_financeiro}</p>
+  <div class="fg"><label>WhatsApp</label><textarea id="bv-tpl-wpp" rows="12" style="width:100%;font-size:13px">${esc(t.wpp)}</textarea></div>
+  <div class="fg"><label>Assunto do e-mail</label><input id="bv-tpl-assunto" style="width:100%" value="${esc(t.assunto)}"></div>
+  <div class="fg"><label>E-mail</label><textarea id="bv-tpl-email" rows="12" style="width:100%;font-size:13px">${esc(t.email)}</textarea></div>
+  <div style="display:flex;gap:8px"><button class="btn bp bpq" onclick="salvarBvTplTela()">Salvar mensagens</button>
+  <button class="btn bs bpq" onclick="if(confirm('Voltar para as mensagens padrão?')){salvarBvTpl(Object.assign({},BV_TPL_PADRAO));rBoasVindas();}">Restaurar padrão</button></div>
+  ${fila.length ? `<div style="margin-top:12px"><div class="lb" style="font-size:12px;font-weight:700;margin-bottom:4px">Prévia (WhatsApp) para ${esc(fila[0].nome)}</div><div style="white-space:pre-wrap;background:#F4F8F4;border:1px solid var(--cbr);border-radius:8px;padding:10px 12px;font-size:12px" id="bv-prev"></div></div>` : ''}
+</div>
+
+${fila.length ? `<div class="tw" style="padding:14px 16px"><h3 style="font-size:14px;margin-bottom:8px">Na fila (${fila.length})</h3>
+<div style="max-height:360px;overflow:auto"><table style="width:100%;font-size:12px;border-collapse:collapse"><tr style="background:var(--cb)"><th style="text-align:left;padding:6px">Aluno</th><th style="text-align:left;padding:6px">Curso</th><th style="text-align:left;padding:6px">Celular</th><th style="text-align:left;padding:6px">E-mail</th><th></th></tr>
+${fila.slice(0,300).map(function(a){ return '<tr style="border-top:1px solid var(--cbr)"><td style="padding:5px 6px">'+esc(a.nome)+'</td><td style="padding:5px 6px">'+esc(a.curso)+'</td><td style="padding:5px 6px">'+(loteTel(a)||'<span style="color:var(--vm)">sem</span>')+'</td><td style="padding:5px 6px">'+(a.email?esc(a.email):'<span style="color:var(--vm)">sem</span>')+'</td><td><button class="btn bs bpq" onclick="marcarBoasVindas([\''+esc(a.id)+'\']);rBoasVindas()">Já recebeu</button></td></tr>'; }).join('')}
+</table></div></div>` : '<div class="tw" style="padding:30px;text-align:center;color:var(--ct)">&#10003; Nenhum renovado aguardando boas-vindas neste ciclo.</div>'}`;
+  var prev = document.getElementById('bv-prev');
+  if(prev && fila.length) prev.textContent = loteAplicar(t.wpp, fila[0]);
+}
+function salvarBvCfg() {
+  atualizarCicloCfg(S.periodo, {
+    bvInicio: inputParaPrazo(document.getElementById('bv-inicio').value || ''),
+    bvVencDia: (document.getElementById('bv-venc').value || '').trim(),
+    bvPrimeiroVenc: inputParaPrazo(document.getElementById('bv-primeiro').value || ''),
+    bvLinkCal: (document.getElementById('bv-linkcal').value || '').trim(),
+    bvLinkFin: (document.getElementById('bv-linkfin').value || '').trim(),
+  });
+  mostrarToast('&#10003; Dados do semestre salvos para toda a equipe.');
+  rBoasVindas();
+}
+function salvarBvTplTela() {
+  salvarBvTpl({
+    wpp: document.getElementById('bv-tpl-wpp').value,
+    assunto: document.getElementById('bv-tpl-assunto').value,
+    email: document.getElementById('bv-tpl-email').value,
+  });
+  mostrarToast('&#10003; Mensagens salvas para toda a equipe.');
+  rBoasVindas();
+}
+function bvMarcarTodos() {
+  var fila = filaBoasVindas();
+  if(!fila.length) return;
+  if(!confirm('Tirar os ' + fila.length + ' alunos da fila SEM enviar mensagem? Use isso para começar a enviar só para os próximos renovados.')) return;
+  marcarBoasVindas(fila.map(function(a){ return a.id; }));
+  rBoasVindas();
+}
+function abrirLoteBoasVindas(canal) {
+  var fila = filaBoasVindas();
+  if(!fila.length) { mostrarToast('Nenhum renovado na fila.'); return; }
+  var cfg = getCicloCfg()[S.periodo] || {};
+  if(!cfg.bvInicio || !cfg.bvVencDia || !cfg.bvPrimeiroVenc || !cfg.bvLinkCal) {
+    if(!confirm('Faltam datas ou o link do calendário. As mensagens vão sair com campos vazios. Continuar?')) return;
+  }
+  var t = getBvTpl();
+  LOTE = { base: fila, canal: canal, fila: [], idx: 0, ok: 0, erro: 0, pulados: 0, erros: [], rodando: false, parar: false,
+           bv: true, preset: { wpp: t.wpp, email: t.email, assunto: t.assunto, tplNome: 'Boas-vindas ' + S.periodo } };
+  renderLoteConfig();
+  abModal('m-lote');
 }
 
 function buildRitmoCard() {
