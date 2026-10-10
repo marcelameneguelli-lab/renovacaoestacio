@@ -1573,6 +1573,27 @@ function carregarConfigGeralGAS() {
       if(window._telaAtiva === 'followup') { try { rFollowup(); } catch(e){} }
     }
     if(!cfg) return;
+    // Base nova importada por outra pessoa (mesmo com o mesmo número de alunos)
+    try {
+      var cicloNovo = Object.keys(cfg).filter(function(k){ return /^ultima_atualizacao_\d{4}\.\d$/.test(k); })
+        .map(function(k){ return k.substring(19); })
+        .filter(function(c){ return String(cfg['ultima_atualizacao_' + c]) !== (localStorage.getItem('base_versao_' + c) || ''); });
+      if(cicloNovo.length && !window._recarregandoBase) {
+        window._recarregandoBase = true;
+        gasGet('carregar_alunos', {}, 60000).then(function(d2) {
+          if(d2 && d2.ok && d2.alunos && d2.alunos.length) {
+            d2.alunos.forEach(function(a){ a.id = String(a.id); a.acionamentos = []; });
+            aplicarBasesServidor(d2.alunos);
+            try { sincronizarStatusAlunos(); } catch(e) {}
+            cicloNovo.forEach(function(c){ localStorage.setItem('base_versao_' + c, String(cfg['ultima_atualizacao_' + c])); });
+            salvarDados();
+            mostrarToast('📥 Base atualizada do servidor (' + cicloNovo.join(', ') + ').');
+            if(!algumModalAberto()) { try { checkAlertas(); var fnT = {dash:rDash,alunos:rAlunos,followup:rFollowup}[window._telaAtiva||'dash']; if(fnT) fnT(); } catch(e) {} }
+          }
+          window._recarregandoBase = false;
+        }).catch(function(){ window._recarregandoBase = false; });
+      }
+    } catch(e) {}
     // Migração: configuração antiga (um período só) vira a config do ciclo atual
     if(cfg.config_geral && !getCicloCfg()[S.periodo]) {
       try {
@@ -4264,21 +4285,19 @@ function calcMetaDiaAuto() {
 
 // Recalcular status dos alunos a partir dos acionamentos (fonte mais atual)
 function sincronizarStatusAlunos() {
-  // O status é sempre recalculado: parte do status da base CSV do ciclo e sobe
-  // (nunca desce) com os acionamentos DESTE ciclo. Assim um "Renovado" de um
-  // semestre não vaza para o outro, e o CSV "ALUNO RENOVADO" é sempre soberano.
-  var hierarquia = { 'Renovado': 4, 'Trancamento': 3, 'Em negociação': 2, 'Evadido': 1, 'Pendente': 0 };
-  var melhorPorAluno = {};
+  // Status do aluno = o ÚLTIMO status registrado num acionamento DESTE ciclo.
+  // Sem acionamento, vale o status da base CSV. Se o CSV diz "ALUNO RENOVADO",
+  // o aluno é Renovado de qualquer forma.
+  var ultimo = {};
   acsCiclo(S.periodo).forEach(function(ac) {
     if(!ac.stAl || !ac.alunoId) return;
     var id = String(ac.alunoId);
-    var atual = melhorPorAluno[id] || 'Pendente';
-    if((hierarquia[ac.stAl]||0) > (hierarquia[atual]||0)) melhorPorAluno[id] = ac.stAl;
+    var t = Number(ac._ts) || Number(ac.id) || 0;
+    if(!ultimo[id] || t >= ultimo[id].t) ultimo[id] = { st: ac.stAl, t: t };
   });
   ALUNOS.forEach(function(a) {
-    var st = statusBaseCsv(a);
-    var melhorAc = melhorPorAluno[String(a.id)] || 'Pendente';
-    if((hierarquia[melhorAc]||0) > (hierarquia[st]||0)) st = melhorAc;
+    var u = ultimo[String(a.id)];
+    var st = u ? u.st : statusBaseCsv(a);
     if(csvRenovado(a)) st = 'Renovado';
     a.status = st;
   });
