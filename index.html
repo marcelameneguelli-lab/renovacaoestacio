@@ -398,6 +398,7 @@ window.addEventListener('unhandledrejection', function(e) {
     <a onclick="ir('importar')">📥 Importar Base</a>
     <a onclick="ir('renovados')">✅ Hist&#xF3;rico</a>
     <a onclick="ir('relatorios')">📊 Relat&#xF3;rios</a>
+    <a onclick="ir('evasao')">🚪 Evas&#xE3;o</a>
     <a onclick="ir('produtividade')">👥 Produtividade</a>
     <a onclick="ir('config')" id="menu-config"><span class="ic"><i class="fa fa-cog"></i></span> Configura&#xE7;&#xF5;es</a>
     <a onclick="abrirAdmin()" id="menu-admin" style="display:none">🔐 Admin</a>
@@ -466,6 +467,7 @@ window.addEventListener('unhandledrejection', function(e) {
     <div id="tela-importar" style="display:none"></div>
     <div id="tela-renovados" style="display:none"></div>
     <div id="tela-relatorios" style="display:none"></div>
+    <div id="tela-evasao" style="display:none"></div>
     <div id="tela-produtividade" style="display:none"></div>
     <div id="tela-config" style="display:none"></div>
   </div>
@@ -952,7 +954,7 @@ function trocarCiclo(c, silencioso) {
   }
   var t = window._telaAtiva || 'dash';
   try {
-    var fn = {dash:rDash,alunos:rAlunos,followup:rFollowup,produtividade:rProdutividade,config:rConfig,importar:rImportar,renovados:rRenovados,relatorios:rRelatorios,envios:rEnvios}[t];
+    var fn = {dash:rDash,alunos:rAlunos,followup:rFollowup,produtividade:rProdutividade,evasao:rEvasao,config:function(){ rConfig(); anexarConfigObjecoes(); },importar:rImportar,renovados:rRenovados,relatorios:rRelatorios,envios:rEnvios}[t];
     if(fn) fn(); else rDash();
   } catch(e) { console.warn('[CICLO] render:', e.message); }
   try { checkAlertas(); } catch(e) {}
@@ -1258,15 +1260,15 @@ function fmtVal(v) { return Number(v||0).toLocaleString('pt-BR',{minimumFraction
 // ═══════════════════════════════════════════
 //  NAVEGAÇÃO
 // ═══════════════════════════════════════════
-const TELAS = ['dash','alunos','envios','followup','importar','renovados','relatorios','produtividade','config'];
-const TITULOS = {dash:'Dashboard',alunos:'Lista de Alunos',envios:'Central de Envios',followup:'Follow-Up',importar:'Importar Base',renovados:'Historico',relatorios:'Relatorios de Acionamentos',produtividade:'Produtividade',config:'Configuracoes'};
+const TELAS = ['dash','alunos','envios','followup','importar','renovados','relatorios','evasao','produtividade','config'];
+const TITULOS = {dash:'Dashboard',alunos:'Lista de Alunos',envios:'Central de Envios',followup:'Follow-Up',importar:'Importar Base',renovados:'Historico',relatorios:'Relatorios de Acionamentos',evasao:'Relatório de Evasão',produtividade:'Produtividade',config:'Configuracoes'};
 function ir(t) {
   TELAS.forEach(x=>document.getElementById('tela-'+x).style.display='none');
   document.getElementById('tela-'+t).style.display='block';
-  document.querySelectorAll('#sb nav a').forEach((el,i)=>{el.classList.remove('on');if(TELAS[i]===t)el.classList.add('on')});
+  document.querySelectorAll('#sb nav a').forEach(el=>{el.classList.remove('on');if((el.getAttribute('onclick')||'')==="ir('"+t+"')")el.classList.add('on')});
   document.getElementById('ttl').textContent = TITULOS[t];
   window._telaAtiva = t;
-  const fn = {dash:rDash,alunos:rAlunos,envios:rEnvios,followup:rFollowup,importar:rImportar,renovados:rRenovados,relatorios:rRelatorios,produtividade:rProdutividade,config:rConfig}[t];
+  const fn = {dash:rDash,alunos:rAlunos,envios:rEnvios,followup:rFollowup,importar:rImportar,renovados:rRenovados,relatorios:rRelatorios,evasao:rEvasao,produtividade:rProdutividade,config:function(){ rConfig(); anexarConfigObjecoes(); }}[t];
   try { if(fn) fn(); } catch(e) { console.error('[ir] erro em r'+t+'():', e.message, e.stack); }
   try { checkAlertas(); } catch(e) { console.error('[ir] checkAlertas:', e); }
   // Ao abrir followup ou dash, forçar sync imediato para dados frescos
@@ -1577,6 +1579,7 @@ function carregarConfigGeralGAS() {
   if(!gasUrl) return;
   gasGet('config').then(function(cfg) {
     if(cfg && cfg[histRenKey()] && mesclarHistRen(cfg[histRenKey()]) && window._telaAtiva === 'dash') { try { rDash(); } catch(e){} }
+    if(cfg && cfg.objecoes_lista) mesclarObjecoesRemotas(cfg.objecoes_lista);
     if(cfg && cfg.fu_concluidos && mesclarFuConcluidos(cfg.fu_concluidos)) {
       try { checkAlertas(); } catch(e){}
       if(window._telaAtiva === 'followup') { try { rFollowup(); } catch(e){} }
@@ -2526,9 +2529,10 @@ function abrirAluno(id) {
 
   <div class="fg" style="margin-top:12px">
     <label>Status atual</label>
-    <select id="status-al">
+    <select id="status-al" onchange="toggleObjecaoBox()">
       ${['Pendente','Em negociação','Renovado','Evadido','Trancamento'].map(s=>`<option ${a.status===s?'selected':''}>${s}</option>`).join('')}
     </select>
+    ${htmlObjecaoBox(a)}
   </div>
   <div class="fg">
     <label>Ação recomendada</label>
@@ -3609,10 +3613,23 @@ function salvarAcionamento() {
   const fuTipo=document.getElementById('fu-tipo')?.value||'';
   const fuPara=document.getElementById('fu-para')?.value||colab;
   const novoSt=document.getElementById('status-al')?.value||a.status;
+  // Evadido exige a principal objeção
+  let objecao='', objecaoDet='', obsFinal=obs;
+  if(novoSt==='Evadido') {
+    objecao=(document.getElementById('objecao-sel')?.value||'').trim();
+    objecaoDet=(document.getElementById('objecao-det')?.value||'').trim().replace(/[\[\]|]/g,' ');
+    if(!objecao) {
+      const sel=document.getElementById('objecao-sel'); if(sel){ sel.style.border='2px solid var(--vm)'; sel.focus(); }
+      mostrarToast('&#9888;️ Selecione a principal objeção do aluno para marcar como Evadido.');
+      window._salvandoAcionamento = false;
+      return;
+    }
+    obsFinal = obs + ' [Objeção: ' + objecao + (objecaoDet ? ' | ' + objecaoDet : '') + ']';
+  }
   S.colab=colab;localStorage.setItem('colab',colab);
   document.getElementById('sb-colab').textContent=colab;
   var _tsAc = Date.now();
-  const novoAc = {id:_tsAc, alunoId:a.id, nomeAluno:a.nome||'', tipo, colab, obs, fuData, fuTipo,
+  const novoAc = {id:_tsAc, alunoId:a.id, nomeAluno:a.nome||'', tipo, colab, obs:obsFinal, objecao, objecaoDet, fuData, fuTipo,
     fuPara: fuData ? fuPara : '',
     fuStatus:fuData?'Agendado':'OK', data:new Date().toLocaleDateString('pt-BR'),
     hora:new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}),
@@ -6700,6 +6717,296 @@ function envioBulk(canal) {
   }
   salvarDados();
   enviarProximo();
+}
+
+
+// ═══════════════════════════════════════════
+//  EVASÃO — objeção obrigatória + relatório gerencial
+// ═══════════════════════════════════════════
+const OBJECOES_PADRAO = [
+  'Financeiro: não consegue pagar a mensalidade',
+  'Financeiro: dívida / negociação não aceita',
+  'Perda de bolsa, FIES ou ProUni',
+  'Foi para outra instituição (concorrência)',
+  'Trabalho / falta de tempo',
+  'Saúde ou questões pessoais / familiares',
+  'Mudança de cidade',
+  'Insatisfação com o curso ou a metodologia',
+  'Insatisfação com atendimento ou infraestrutura',
+  'Não se identificou com o curso / vai trocar de curso',
+  'Pausa temporária (pretende voltar)',
+  'Sem contato / não respondeu',
+  'Outro',
+];
+function getObjecoes() {
+  try {
+    var l = JSON.parse(localStorage.getItem('objecoes_lista') || 'null');
+    if(Array.isArray(l) && l.length) return l;
+  } catch(e) {}
+  return OBJECOES_PADRAO.slice();
+}
+function salvarObjecoes(lista) {
+  localStorage.setItem('objecoes_lista', JSON.stringify(lista));
+  if(localStorage.getItem('gasUrl')) gasPost('salvar_config', { chave: 'objecoes_lista', valor: JSON.stringify(lista) }).catch(function(){});
+}
+function mesclarObjecoesRemotas(txt) {
+  try {
+    var l = JSON.parse(txt || 'null');
+    if(Array.isArray(l) && l.length && JSON.stringify(l) !== localStorage.getItem('objecoes_lista')) {
+      localStorage.setItem('objecoes_lista', JSON.stringify(l));
+    }
+  } catch(e) {}
+}
+
+// A objeção vai no próprio acionamento (campo objecao) e também no texto da
+// observação, entre colchetes, para chegar a todos os computadores pelo sync
+// sem precisar mudar o GAS: "... [Objeção: X | detalhe]"
+function objecaoDoAc(ac) {
+  if(!ac) return null;
+  if(ac.objecao) return { obj: ac.objecao, det: ac.objecaoDet || '' };
+  var m = String(ac.obs || '').match(/\[Obje[çc][ãa]o:\s*([^|\]]+?)\s*(?:\|\s*([^\]]*))?\]/);
+  return m ? { obj: m[1].trim(), det: (m[2] || '').trim() } : null;
+}
+function ultimaObjecaoAluno(alunoId, acs) {
+  var id = String(alunoId), best = null, bestT = -1;
+  (acs || acsCiclo()).forEach(function(ac) {
+    if(String(ac.alunoId) !== id) return;
+    var o = objecaoDoAc(ac);
+    if(!o) return;
+    var t = Number(ac._ts) || Number(ac.id) || 0;
+    if(t >= bestT) { bestT = t; best = { obj: o.obj, det: o.det, colab: ac.colab || '', data: ac.data || '', ts: t }; }
+  });
+  return best;
+}
+function toggleObjecaoBox() {
+  var st = document.getElementById('status-al');
+  var box = document.getElementById('objecao-box');
+  if(st && box) box.style.display = st.value === 'Evadido' ? 'block' : 'none';
+}
+function htmlObjecaoBox(a) {
+  var atual = ultimaObjecaoAluno(a.id);
+  var lista = getObjecoes();
+  return '<div class="fg" id="objecao-box" style="display:' + (a.status === 'Evadido' ? 'block' : 'none') + ';background:var(--vmb);border:1px solid var(--vm);border-radius:8px;padding:10px 12px;margin-top:8px">'
+    + '<label style="color:var(--vm);font-weight:700">Principal objeção para não renovar (obrigatório)</label>'
+    + '<select id="objecao-sel" style="width:100%"><option value="">Selecione a principal objeção...</option>'
+    + lista.map(function(o){ return '<option' + (atual && atual.obj === o ? ' selected' : '') + '>' + o + '</option>'; }).join('')
+    + '</select>'
+    + '<input id="objecao-det" style="width:100%;margin-top:6px" placeholder="Detalhe (opcional): ex. foi para a faculdade X, valor que cabe no bolso..." value="' + (atual ? String(atual.det).replace(/"/g, '&quot;') : '') + '">'
+    + '</div>';
+}
+
+// ── Relatório ──
+function dadosEvasao() {
+  var todos = window._evCiclo === 'todos';
+  var ciclos = todos ? Object.keys(BASES).filter(function(c){ return BASES[c] && BASES[c].length; }) : [S.periodo];
+  var linhas = [], baseTotal = 0, baseBU = {}, baseCurso = {}, baseMod = {};
+  ciclos.forEach(function(c) {
+    var lista = BASES[c] || [];
+    var acs = acsCiclo(c);
+    // status do ciclo: último status registrado ou o da base
+    var ult = {};
+    acs.forEach(function(ac) {
+      if(!ac.stAl) return;
+      var t = Number(ac._ts) || Number(ac.id) || 0, id = String(ac.alunoId);
+      if(!ult[id] || t >= ult[id].t) ult[id] = { st: ac.stAl, t: t, colab: ac.colab, data: ac.data };
+    });
+    lista.forEach(function(a) {
+      baseTotal++;
+      var bu = a.bu || 'Não informado', mod = a.modalidade || 'Não informado', cur = a.curso || 'Não informado';
+      baseBU[bu] = (baseBU[bu]||0) + 1; baseMod[mod] = (baseMod[mod]||0) + 1; baseCurso[cur] = (baseCurso[cur]||0) + 1;
+      var u = ult[String(a.id)];
+      var st = csvRenovado(a) ? 'Renovado' : (u ? u.st : statusBaseCsv(a));
+      if(st !== 'Evadido') return;
+      var ob = ultimaObjecaoAluno(a.id, acs);
+      linhas.push({
+        ciclo: c, id: String(a.id), nome: a.nome || '', curso: cur, bu: bu, modalidade: mod,
+        periodo: a.periodo || '', safra: a.safra || '', divTotal: Number(a.divTotal) || 0,
+        objecao: ob ? ob.obj : '', detalhe: ob ? ob.det : '',
+        colab: ob ? ob.colab : (u ? u.colab || '' : ''), data: ob ? ob.data : (u ? u.data || '' : ''),
+        origem: u && u.st === 'Evadido' ? 'CRM' : 'Base CSV',
+      });
+    });
+  });
+  // filtros
+  var f = window._evFil || {};
+  var filtradas = linhas.filter(function(l) {
+    if(f.bu && l.bu !== f.bu) return false;
+    if(f.mod && l.modalidade !== f.mod) return false;
+    if(f.obj === '__sem' && l.objecao) return false;
+    if(f.obj && f.obj !== '__sem' && l.objecao !== f.obj) return false;
+    return true;
+  });
+  return { linhas: filtradas, todas: linhas, baseTotal: baseTotal, baseBU: baseBU, baseCurso: baseCurso, baseMod: baseMod, ciclos: ciclos };
+}
+function contarPor(linhas, campo) {
+  var m = {};
+  linhas.forEach(function(l){ var k = l[campo] || 'Não informado'; m[k] = (m[k]||0) + 1; });
+  return Object.keys(m).map(function(k){ return [k, m[k]]; }).sort(function(a,b){ return b[1]-a[1]; });
+}
+function escEv(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function rEvasao() {
+  try { sincronizarStatusAlunos(); } catch(e) {}
+  var D = dadosEvasao(), L = D.linhas;
+  var f = window._evFil || {};
+  var comObj = L.filter(function(l){ return l.objecao; });
+  var semObj = L.filter(function(l){ return !l.objecao; });
+  var porObj = contarPor(comObj, 'objecao');
+  var maxObj = porObj.length ? porObj[0][1] : 1;
+  var divMedia = L.length ? L.reduce(function(s,l){ return s + l.divTotal; }, 0) / L.length : 0;
+  var comDivida = L.filter(function(l){ return l.divTotal > 0; }).length;
+
+  // cruzamentos
+  var objs = porObj.map(function(x){ return x[0]; });
+  var bus = Object.keys(D.baseBU).sort();
+  var matriz = objs.map(function(o) {
+    return '<tr><td>' + escEv(o) + '</td>' + bus.map(function(b){
+      var n = comObj.filter(function(l){ return l.objecao === o && l.bu === b; }).length;
+      return '<td style="text-align:center">' + (n || '') + '</td>';
+    }).join('') + '<td style="text-align:center;font-weight:700">' + comObj.filter(function(l){ return l.objecao === o; }).length + '</td></tr>';
+  }).join('');
+  var porCurso = contarPor(L, 'curso').slice(0, 10);
+  var porMod = contarPor(L, 'modalidade');
+  var porPer = contarPor(L, 'periodo').sort(function(a,b){ return (parseInt(a[0])||99) - (parseInt(b[0])||99); });
+  var porColab = contarPor(comObj, 'colab');
+  var porSafra = contarPor(L, 'safra');
+
+  function tabela(titulo, linhas, baseMap, rotulo) {
+    if(!linhas.length) return '';
+    return '<div class="ev-card"><div class="ev-tit">' + titulo + '</div><table class="ev-tb"><tr><th>' + rotulo + '</th><th>Evadidos</th>' + (baseMap ? '<th>% da base</th>' : '<th>% dos evadidos</th>') + '</tr>'
+      + linhas.map(function(x){
+          var pct = baseMap ? fmtPct(pct2(x[1], baseMap[x[0]] || 0)) : fmtPct(pct2(x[1], L.length));
+          return '<tr><td>' + escEv(x[0]) + '</td><td style="text-align:center">' + x[1] + '</td><td style="text-align:center">' + pct + '</td></tr>';
+        }).join('') + '</table></div>';
+  }
+
+  // insights
+  var ins = [];
+  if(porObj.length) ins.push('A principal objeção é <strong>' + escEv(porObj[0][0]) + '</strong>: ' + porObj[0][1] + ' aluno(s), ' + fmtPct(pct2(porObj[0][1], comObj.length)) + ' dos evadidos com objeção registrada.');
+  var fin = comObj.filter(function(l){ return /financ|d[ií]vida|bolsa|fies|prouni/i.test(l.objecao); }).length;
+  if(comObj.length) ins.push('Motivos financeiros (mensalidade, dívida, bolsa/FIES/ProUni) somam <strong>' + fin + '</strong> casos (' + fmtPct(pct2(fin, comObj.length)) + ').');
+  if(porCurso.length) ins.push('Curso com mais evasões: <strong>' + escEv(porCurso[0][0]) + '</strong> (' + porCurso[0][1] + ').');
+  if(semObj.length) ins.push('<span style="color:var(--vm)"><strong>' + semObj.length + '</strong> evadido(s) ainda sem objeção registrada. Registre para o relatório ficar completo.</span>');
+  if(L.length) ins.push(comDivida + ' evadido(s) têm dívida, com média de R$ ' + fmtVal(divMedia) + ' por aluno.');
+
+  var opts = function(lista, sel) { return lista.map(function(o){ return '<option value="' + escEv(o) + '"' + (sel === o ? ' selected' : '') + '>' + escEv(o) + '</option>'; }).join(''); };
+  var cicloTxt = window._evCiclo === 'todos' ? 'todos os ciclos (' + D.ciclos.join(', ') + ')' : 'ciclo ' + S.periodo;
+
+  document.getElementById('tela-evasao').innerHTML = `
+<style>
+  .ev-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:14px}
+  .ev-kpi{background:#fff;border:1px solid var(--cbr);border-radius:10px;padding:12px 14px}
+  .ev-kpi .n{font-size:24px;font-weight:800}
+  .ev-kpi .l{font-size:11px;color:var(--ct);text-transform:uppercase;letter-spacing:.4px}
+  .ev-card{background:#fff;border:1px solid var(--cbr);border-radius:10px;padding:12px 14px;margin-bottom:12px}
+  .ev-tit{font-size:12px;font-weight:700;color:var(--az);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px}
+  .ev-tb{width:100%;border-collapse:collapse;font-size:12px}
+  .ev-tb th{background:var(--cb);text-align:left;padding:6px 8px;font-size:11px}
+  .ev-tb td{padding:5px 8px;border-top:1px solid var(--cbr)}
+  .ev-bar{display:flex;align-items:center;gap:8px;margin:5px 0;font-size:12px}
+  .ev-bar .t{flex:0 0 42%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ev-bar .b{flex:1;background:var(--cb);border-radius:4px;height:16px;overflow:hidden}
+  .ev-bar .b div{height:100%;background:#C0392B;border-radius:4px}
+  .ev-bar .v{flex:0 0 90px;text-align:right;font-weight:700}
+  .ev-2col{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px}
+  body.dark .ev-kpi,body.dark .ev-card{background:#161b22}
+</style>
+<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+  <select onchange="window._evCiclo=this.value;rEvasao()"><option value="atual" ${window._evCiclo!=='todos'?'selected':''}>Ciclo ${S.periodo}</option><option value="todos" ${window._evCiclo==='todos'?'selected':''}>Todos os ciclos</option></select>
+  <select onchange="window._evFil=Object.assign({},window._evFil,{bu:this.value});rEvasao()"><option value="">Todas as BUs</option>${opts(Object.keys(D.baseBU).sort(), f.bu)}</select>
+  <select onchange="window._evFil=Object.assign({},window._evFil,{mod:this.value});rEvasao()"><option value="">Todas as modalidades</option>${opts(Object.keys(D.baseMod).sort(), f.mod)}</select>
+  <select onchange="window._evFil=Object.assign({},window._evFil,{obj:this.value});rEvasao()"><option value="">Todas as objeções</option><option value="__sem" ${f.obj==='__sem'?'selected':''}>Sem objeção registrada</option>${opts(getObjecoes(), f.obj)}</select>
+  <span style="margin-left:auto;display:flex;gap:6px">
+    <button class="btn bs bpq" onclick="exportarEvasaoCSV()">⬇ CSV</button>
+    <button class="btn bp bpq" onclick="imprimirEvasao()">🖨 Imprimir / PDF</button>
+  </span>
+</div>
+<div id="ev-print">
+<div style="font-size:12px;color:var(--ct);margin-bottom:10px">Relatório de evasão · ${escEv(cicloTxt)} · gerado em ${new Date().toLocaleString('pt-BR')}</div>
+<div class="ev-grid">
+  <div class="ev-kpi"><div class="l">Evadidos</div><div class="n" style="color:var(--vm)">${L.length}</div><div class="l">${fmtPct(pct2(L.length, D.baseTotal))} da base (${D.baseTotal})</div></div>
+  <div class="ev-kpi"><div class="l">Com objeção</div><div class="n" style="color:var(--az)">${comObj.length}</div><div class="l">${fmtPct(pct2(comObj.length, L.length))} dos evadidos</div></div>
+  <div class="ev-kpi"><div class="l">Sem objeção</div><div class="n" style="color:var(--la)">${semObj.length}</div><div class="l">pendente de registro</div></div>
+  <div class="ev-kpi"><div class="l">Dívida média</div><div class="n" style="font-size:20px">R$ ${fmtVal(divMedia)}</div><div class="l">${comDivida} com dívida</div></div>
+</div>
+${ins.length ? `<div class="ev-card"><div class="ev-tit">Leitura rápida</div><ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.7">${ins.map(function(i){return '<li>'+i+'</li>';}).join('')}</ul></div>` : ''}
+<div class="ev-card"><div class="ev-tit">Principais objeções</div>
+  ${porObj.length ? porObj.map(function(x){ return '<div class="ev-bar"><span class="t" title="'+escEv(x[0])+'">'+escEv(x[0])+'</span><span class="b"><div style="width:'+Math.max(3, Math.round(x[1]/maxObj*100))+'%"></div></span><span class="v">'+x[1]+' · '+fmtPct(pct2(x[1], comObj.length))+'</span></div>'; }).join('') : '<div style="color:var(--ct);font-size:13px">Nenhuma objeção registrada ainda. Ao marcar um aluno como Evadido no painel do aluno, a objeção passa a ser obrigatória.</div>'}
+</div>
+${matriz ? `<div class="ev-card"><div class="ev-tit">Objeção × BU</div><table class="ev-tb"><tr><th>Objeção</th>${bus.map(function(b){return '<th style="text-align:center">'+escEv(b)+'</th>';}).join('')}<th style="text-align:center">Total</th></tr>${matriz}</table></div>` : ''}
+<div class="ev-2col">
+  ${tabela('Cursos com mais evasões (top 10)', porCurso, D.baseCurso, 'Curso')}
+  ${tabela('Por modalidade', porMod, D.baseMod, 'Modalidade')}
+  ${tabela('Por período do aluno', porPer.map(function(x){ return [x[0] ? x[0] + 'º período' : 'Não informado', x[1]]; }), null, 'Período')}
+  ${tabela('Por safra', porSafra, null, 'Safra')}
+  ${tabela('Objeções registradas por atendente', porColab, null, 'Atendente')}
+</div>
+<div class="ev-card"><div class="ev-tit">Alunos evadidos (${L.length})</div>
+<div style="max-height:460px;overflow:auto">
+<table class="ev-tb"><tr><th>Aluno</th><th>Curso</th><th>BU</th><th>Objeção</th><th>Detalhe</th><th>Atendente</th><th>Data</th><th>Dívida</th><th class="noprint"></th></tr>
+${L.sort(function(a,b){ return (a.objecao?1:0)-(b.objecao?1:0) || a.nome.localeCompare(b.nome); }).map(function(l){
+  return '<tr><td><strong>'+escEv(l.nome)+'</strong><br><span style="font-size:10px;color:var(--ct)">'+escEv(l.id)+(window._evCiclo==='todos'?' · '+l.ciclo:'')+' · '+l.origem+'</span></td>'
+    +'<td>'+escEv(l.curso)+'</td><td>'+escEv(l.bu)+'</td>'
+    +'<td>'+(l.objecao?escEv(l.objecao):'<span style="color:var(--la);font-weight:700">não registrada</span>')+'</td>'
+    +'<td style="font-size:11px">'+escEv(l.detalhe)+'</td><td>'+escEv(l.colab)+'</td><td>'+escEv(l.data)+'</td>'
+    +'<td style="text-align:right">'+(l.divTotal?'R$ '+fmtVal(l.divTotal):'')+'</td>'
+    +'<td class="noprint">'+(l.ciclo===S.periodo?'<button class="btn '+(l.objecao?'bs':'bp')+' bpq" onclick="abrirAluno(\''+escEv(l.id)+'\')">'+(l.objecao?'Ver':'Registrar')+'</button>':'')+'</td></tr>';
+}).join('')}
+</table></div></div>
+</div>`;
+}
+
+function exportarEvasaoCSV() {
+  var L = dadosEvasao().linhas;
+  if(!L.length) { mostrarToast('Nenhum evadido para exportar.'); return; }
+  var hd = ['Ciclo','Matrícula','Nome','Curso','BU','Modalidade','Período','Safra','Objeção','Detalhe','Atendente','Data registro','Dívida total','Origem'];
+  var q = function(v){ return '"' + String(v == null ? '' : v).replace(/"/g,'""') + '"'; };
+  var csv = [hd.join(';')].concat(L.map(function(l){
+    return [l.ciclo,l.id,l.nome,l.curso,l.bu,l.modalidade,l.periodo,l.safra,l.objecao||'Não registrada',l.detalhe,l.colab,l.data,fmtVal(l.divTotal),l.origem].map(q).join(';');
+  })).join('\r\n');
+  var blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'evasao_' + S.periodo + '_' + new Date().toLocaleDateString('pt-BR').replace(/\//g,'-') + '.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+function imprimirEvasao() {
+  var el = document.getElementById('ev-print');
+  if(!el) return;
+  var estilos = document.querySelector('#tela-evasao style');
+  var win = window.open('', '_blank');
+  if(!win) { mostrarToast('Permita pop-ups para imprimir o relatório.'); return; }
+  win.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Relatório de Evasão · ' + S.periodo + '</title>'
+    + '<style>:root{--cbr:#dde3ee;--cb:#f4f6fa;--ct:#6B7A99;--az:#0A3D8F;--vm:#C0392B;--la:#D68910;--azm:#1A5CC0}'
+    + 'body{font-family:Arial,sans-serif;color:#1A2340;padding:18px;font-size:12px}.noprint{display:none}'
+    + 'h1{color:#0A3D8F;font-size:18px;margin:0 0 4px}div[style*="max-height"]{max-height:none!important;overflow:visible!important}'
+    + '.ev-card,.ev-kpi{break-inside:avoid}</style>'
+    + (estilos ? estilos.outerHTML : '')
+    + '</head><body><h1>Relatório Gerencial de Evasão · Estácio Volta Redonda</h1>' + el.innerHTML
+    + '<script>window.onload=function(){window.print();}<\/script></body></html>');
+  win.document.close();
+}
+
+function anexarConfigObjecoes() {
+  var tela = document.getElementById('tela-config');
+  if(!tela || document.getElementById('cfg-objecoes')) return;
+  var div = document.createElement('div');
+  div.id = 'cfg-objecoes';
+  div.className = 'tw';
+  div.style.cssText = 'padding:16px;margin-top:14px';
+  div.innerHTML = '<h3 style="font-size:14px;margin-bottom:6px">🚪 Objeções de evasão</h3>'
+    + '<p style="font-size:12px;color:var(--ct);margin-bottom:8px">Uma por linha. É a lista que aparece ao marcar um aluno como Evadido. Vale para toda a equipe.</p>'
+    + '<textarea id="cfg-objecoes-txt" rows="10" style="width:100%;font-size:13px">' + escEv(getObjecoes().join('\n')) + '</textarea>'
+    + '<div style="display:flex;gap:8px;margin-top:8px"><button class="btn bp bpq" onclick="salvarObjecoesCfg()">Salvar lista</button>'
+    + '<button class="btn bs bpq" onclick="document.getElementById(\'cfg-objecoes-txt\').value=OBJECOES_PADRAO.join(\'\\n\')">Restaurar padrão</button></div>';
+  tela.appendChild(div);
+}
+function salvarObjecoesCfg() {
+  var l = (document.getElementById('cfg-objecoes-txt').value || '').split('\n').map(function(x){ return x.trim(); }).filter(Boolean);
+  if(!l.length) { mostrarToast('A lista não pode ficar vazia.'); return; }
+  salvarObjecoes(l);
+  mostrarToast('&#10003; Lista de objeções salva para toda a equipe.');
 }
 
 function buildRitmoCard() {
