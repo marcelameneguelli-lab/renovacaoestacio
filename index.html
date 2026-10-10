@@ -1585,7 +1585,7 @@ function carregarConfigGeralGAS() {
   gasGet('config').then(function(cfg) {
     if(cfg && cfg[histRenKey()] && mesclarHistRen(cfg[histRenKey()]) && window._telaAtiva === 'dash') { try { rDash(); } catch(e){} }
     if(cfg && cfg.objecoes_lista) mesclarObjecoesRemotas(cfg.objecoes_lista);
-    if(cfg && cfg.bv_tpl) { try { if(cfg.bv_tpl !== localStorage.getItem('bv_tpl')) localStorage.setItem('bv_tpl', cfg.bv_tpl); } catch(e) {} }
+    if(cfg && cfg.bv_tpl_v2) { try { if(cfg.bv_tpl_v2 !== localStorage.getItem('bv_tpl_v2')) localStorage.setItem('bv_tpl_v2', cfg.bv_tpl_v2); } catch(e) {} }
     if(cfg && cfg[bvKey()] && mesclarBv(cfg[bvKey()])) { try { atualizarBadgeBv(); if(window._telaAtiva==='boasvindas') rBoasVindas(); } catch(e) {} }
     if(cfg && cfg.fu_concluidos && mesclarFuConcluidos(cfg.fu_concluidos)) {
       try { checkAlertas(); } catch(e){}
@@ -6357,6 +6357,8 @@ function loteAplicar(txt, a) {
     .replace(/\{atendente\}/gi, S.colab || '')
     .replace(/\{ciclo\}/gi, S.periodo || '')
     .replace(/\{inicio_aulas\}/gi, (getCicloCfg()[S.periodo]||{}).bvInicio || '')
+    .replace(/\{num_parcelas\}/gi, (getCicloCfg()[S.periodo]||{}).bvParcelas || '6')
+    .replace(/\{mes_primeira\}/gi, (getCicloCfg()[S.periodo]||{}).bvMesPrimeira || '')
     .replace(/\{venc_dia\}/gi, (getCicloCfg()[S.periodo]||{}).bvVencDia || '')
     .replace(/\{primeiro_venc\}/gi, (getCicloCfg()[S.periodo]||{}).bvPrimeiroVenc || '')
     .replace(/\{link_calendario\}/gi, (getCicloCfg()[S.periodo]||{}).bvLinkCal || '')
@@ -7055,29 +7057,17 @@ function abrirRecupera(aluno) {
 //  (WhatsApp em fila ou mala direta do Outlook institucional).
 // ═══════════════════════════════════════════
 const BV_TPL_PADRAO = {
-  wpp: 'Olá, {nome}! 🎉\n\n'
-     + 'Sua matrícula no curso de *{curso}* está renovada para o semestre *{ciclo}*. Seja muito bem-vindo(a) de volta à *Estácio Volta Redonda*!\n\n'
-     + '📅 *Calendário acadêmico*\nAs aulas começam em *{inicio_aulas}*. Confira todas as datas do semestre (provas, prazos e feriados) em: {link_calendario}\n\n'
-     + '💰 *Calendário financeiro*\nO valor do semestre (semestralidade) é dividido em parcelas mensais, com vencimento todo dia *{venc_dia}*. A primeira parcela do novo semestre vence em *{primeiro_venc}*.\n\n'
-     + '⚠️ *Atenção à sobreposição de mensalidades*\nSe ainda houver alguma parcela do semestre anterior em aberto, ela pode vencer no mesmo mês da primeira parcela do novo semestre, e você teria duas cobranças juntas. Para evitar isso, mantenha os pagamentos em dia ou fale com a gente para negociar com antecedência.\n\n'
-     + 'Qualquer dúvida, é só responder esta mensagem. Ótimo semestre! 📚\n'
-     + 'Equipe de Relacionamento · Estácio Volta Redonda',
-  assunto: 'Bem-vindo(a) ao semestre {ciclo} · Estácio Volta Redonda',
-  email: 'Olá, {nome}!\n\n'
-     + 'Sua matrícula no curso de {curso} está renovada para o semestre {ciclo}. Seja muito bem-vindo(a) de volta à Estácio Volta Redonda!\n\n'
-     + 'CALENDÁRIO ACADÊMICO\nAs aulas começam em {inicio_aulas}. Confira todas as datas do semestre (provas, prazos e feriados) em: {link_calendario}\n\n'
-     + 'CALENDÁRIO FINANCEIRO\nO valor do semestre (semestralidade) é dividido em parcelas mensais, com vencimento todo dia {venc_dia}. A primeira parcela do novo semestre vence em {primeiro_venc}.\n\n'
-     + 'ATENÇÃO À SOBREPOSIÇÃO DE MENSALIDADES\nSe ainda houver alguma parcela do semestre anterior em aberto, ela pode vencer no mesmo mês da primeira parcela do novo semestre, gerando duas cobranças juntas. Para evitar isso, mantenha os pagamentos em dia ou procure a equipe de Relacionamento para negociar com antecedência. Consulte e regularize pendências em: {link_financeiro}\n\n'
-     + 'Estamos à disposição. Ótimo semestre!\n\n'
-     + 'Atenciosamente,\nEquipe de Relacionamento · Estácio Volta Redonda',
+  wpp: "Olá, {nome}! 🎉\nSua matrícula no curso de {curso} está RENOVADA para o semestre {ciclo}! 💙🧡\nSeja muito bem-vindo(a) a mais um semestre na Estácio Volta Redonda! 📚\n\nPara facilitar, reunimos abaixo as principais informações e dúvidas que recebemos sobre a renovação:\n\n📅 QUANDO COMEÇAM AS AULAS?\nAs aulas do semestre {ciclo} têm início em {inicio_aulas}.\n\n📲 ONDE CONSULTO MEU CALENDÁRIO E AS INFORMAÇÕES DAS AULAS?\nVocê pode acompanhar o calendário acadêmico, a grade de horários das disciplinas e demais informações pelo SIA, APP Minha Estácio e Sala de Aula Virtual (SAVA).\n\n💰 COMO FUNCIONA A COBRANÇA DO NOVO SEMESTRE?\nA semestralidade é dividida em {num_parcelas} mensalidades. A primeira mensalidade do novo semestre, considerada como renovação, é referente a {mes_primeira}.\n\n⚠️ ATENÇÃO À RENOVAÇÃO TARDIA:\nCaso a renovação seja realizada após o início do período regular de cobrança, as mensalidades poderão ser geradas de forma acumulada, de acordo com a data em que a renovação foi realizada.\nPor isso, é importante ficar atento(a) ao período de renovação e às datas de vencimento das mensalidades.\n\n⚠️ TENHO MENSALIDADE DO SEMESTRE ANTERIOR EM ABERTO. E AGORA?\nA renovação da matrícula não elimina débitos anteriores. Caso exista alguma parcela em aberto, ela poderá coincidir com a cobrança do novo semestre.\nPara evitar a concentração de valores no mesmo período, recomendamos que você regularize ou negocie eventuais pendências o quanto antes.\n\n📚 QUANDO VOU CONSEGUIR VER MINHAS DISCIPLINAS?\nA grade e as disciplinas disponíveis podem ser consultadas pelos canais acadêmicos após a atualização do semestre. Caso identifique alguma divergência, entre em contato com a unidade.\n\n🔐 NÃO ESTOU CONSEGUINDO ACESSAR O SIA/SAVA.\nVerifique primeiro seu login e senha. Se o problema persistir, podemos orientar você sobre os canais corretos para atendimento.\n\n🔄 POSSO ALTERAR CURSO OU MODALIDADE APÓS A RENOVAÇÃO?\nSim, existem situações em que é possível solicitar alterações. Se você percebeu que o curso ou a modalidade atual não atende mais às suas necessidades, fale conosco antes de tomar qualquer decisão sobre a continuidade do curso. Podemos verificar as possibilidades disponíveis para o seu caso.\n\n📌 IMPORTANTE:\nA renovação garante a continuidade da sua matrícula, mas é fundamental acompanhar calendário, disciplinas, avaliações e situação financeira ao longo do semestre.\n\n💬 Ficou com alguma dúvida que não apareceu aqui?\nResponda esta mensagem e nossa equipe poderá orientar você.\n\nDesejamos um excelente semestre! 🚀📚\nEquipe de Relacionamento\nEstácio Volta Redonda",
+  assunto: 'Sua matrícula está renovada para o semestre {ciclo} · Estácio Volta Redonda',
+  email: "Olá, {nome}! 🎉\nSua matrícula no curso de {curso} está RENOVADA para o semestre {ciclo}! 💙🧡\nSeja muito bem-vindo(a) a mais um semestre na Estácio Volta Redonda! 📚\n\nPara facilitar, reunimos abaixo as principais informações e dúvidas que recebemos sobre a renovação:\n\n📅 QUANDO COMEÇAM AS AULAS?\nAs aulas do semestre {ciclo} têm início em {inicio_aulas}.\n\n📲 ONDE CONSULTO MEU CALENDÁRIO E AS INFORMAÇÕES DAS AULAS?\nVocê pode acompanhar o calendário acadêmico, a grade de horários das disciplinas e demais informações pelo SIA, APP Minha Estácio e Sala de Aula Virtual (SAVA).\n\n💰 COMO FUNCIONA A COBRANÇA DO NOVO SEMESTRE?\nA semestralidade é dividida em {num_parcelas} mensalidades. A primeira mensalidade do novo semestre, considerada como renovação, é referente a {mes_primeira}.\n\n⚠️ ATENÇÃO À RENOVAÇÃO TARDIA:\nCaso a renovação seja realizada após o início do período regular de cobrança, as mensalidades poderão ser geradas de forma acumulada, de acordo com a data em que a renovação foi realizada.\nPor isso, é importante ficar atento(a) ao período de renovação e às datas de vencimento das mensalidades.\n\n⚠️ TENHO MENSALIDADE DO SEMESTRE ANTERIOR EM ABERTO. E AGORA?\nA renovação da matrícula não elimina débitos anteriores. Caso exista alguma parcela em aberto, ela poderá coincidir com a cobrança do novo semestre.\nPara evitar a concentração de valores no mesmo período, recomendamos que você regularize ou negocie eventuais pendências o quanto antes.\n\n📚 QUANDO VOU CONSEGUIR VER MINHAS DISCIPLINAS?\nA grade e as disciplinas disponíveis podem ser consultadas pelos canais acadêmicos após a atualização do semestre. Caso identifique alguma divergência, entre em contato com a unidade.\n\n🔐 NÃO ESTOU CONSEGUINDO ACESSAR O SIA/SAVA.\nVerifique primeiro seu login e senha. Se o problema persistir, podemos orientar você sobre os canais corretos para atendimento.\n\n🔄 POSSO ALTERAR CURSO OU MODALIDADE APÓS A RENOVAÇÃO?\nSim, existem situações em que é possível solicitar alterações. Se você percebeu que o curso ou a modalidade atual não atende mais às suas necessidades, fale conosco antes de tomar qualquer decisão sobre a continuidade do curso. Podemos verificar as possibilidades disponíveis para o seu caso.\n\n📌 IMPORTANTE:\nA renovação garante a continuidade da sua matrícula, mas é fundamental acompanhar calendário, disciplinas, avaliações e situação financeira ao longo do semestre.\n\n💬 Ficou com alguma dúvida que não apareceu aqui?\nResponda esta mensagem e nossa equipe poderá orientar você.\n\nDesejamos um excelente semestre! 🚀📚\nEquipe de Relacionamento\nEstácio Volta Redonda",
 };
 function getBvTpl() {
-  try { var t = JSON.parse(localStorage.getItem('bv_tpl') || 'null'); if(t && t.wpp) return t; } catch(e) {}
+  try { var t = JSON.parse(localStorage.getItem('bv_tpl_v2') || 'null'); if(t && t.wpp) return t; } catch(e) {}
   return Object.assign({}, BV_TPL_PADRAO);
 }
 function salvarBvTpl(t) {
-  localStorage.setItem('bv_tpl', JSON.stringify(t));
-  if(localStorage.getItem('gasUrl')) gasPost('salvar_config', { chave: 'bv_tpl', valor: JSON.stringify(t) }).catch(function(){});
+  localStorage.setItem('bv_tpl_v2', JSON.stringify(t));
+  if(localStorage.getItem('gasUrl')) gasPost('salvar_config', { chave: 'bv_tpl_v2', valor: JSON.stringify(t) }).catch(function(){});
 }
 function bvKey(c) { return 'bv_' + (c || S.periodo); }
 function getBvSet(c) {
@@ -7134,7 +7124,7 @@ function rBoasVindas() {
   var semTel = fila.filter(function(a){ return !loteTel(a); }).length;
   var semEmail = fila.filter(function(a){ return !String(a.email||'').includes('@'); }).length;
   var esc = function(s){ return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); };
-  var faltaCfg = !cfg.bvInicio || !cfg.bvVencDia || !cfg.bvPrimeiroVenc || !cfg.bvLinkCal;
+  var faltaCfg = !cfg.bvInicio || !cfg.bvParcelas || !cfg.bvMesPrimeira;
   document.getElementById('tela-boasvindas').innerHTML = `
 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:14px">
   <div class="cm vd"><div class="lb">Aguardando boas-vindas</div><div class="vl">${fila.length}</div><div class="sb2">renovados do ciclo ${S.periodo}</div></div>
@@ -7152,24 +7142,22 @@ function rBoasVindas() {
     </span>
   </div>
   <p style="font-size:12px;color:var(--ct);margin-top:8px">A fila se atualiza sozinha: sempre que um aluno aparece como <strong>Renovado</strong> (pela base ou por acionamento), ele entra aqui e o menu mostra o número. Quem recebe sai da fila para toda a equipe.</p>
-  ${faltaCfg ? '<p style="font-size:12px;color:var(--vm);font-weight:700;margin-top:6px">&#9888;️ Preencha as datas e o link do calendário abaixo antes de enviar.</p>' : ''}
+  ${faltaCfg ? '<p style="font-size:12px;color:var(--vm);font-weight:700;margin-top:6px">&#9888;️ Preencha os dados do semestre abaixo antes de enviar.</p>' : ''}
 </div>
 
 <div class="tw" style="padding:14px 16px;margin-bottom:14px">
   <h3 style="font-size:14px;margin-bottom:10px">📅 Dados do semestre ${S.periodo}</h3>
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px">
     <div class="fg"><label>Início das aulas</label><input type="date" id="bv-inicio" value="${prazoParaInput(cfg.bvInicio||'')}"></div>
-    <div class="fg"><label>Dia de vencimento das mensalidades</label><input type="number" min="1" max="31" id="bv-venc" value="${esc(cfg.bvVencDia||'')}" placeholder="Ex: 10"></div>
-    <div class="fg"><label>1ª parcela do novo semestre vence em</label><input type="date" id="bv-primeiro" value="${prazoParaInput(cfg.bvPrimeiroVenc||'')}"></div>
-    <div class="fg"><label>Link do calendário acadêmico</label><input id="bv-linkcal" value="${esc(cfg.bvLinkCal||'')}" placeholder="https://..."></div>
-    <div class="fg"><label>Link para consultar/pagar (financeiro)</label><input id="bv-linkfin" value="${esc(cfg.bvLinkFin||'')}" placeholder="https://..."></div>
+    <div class="fg"><label>Nº de mensalidades da semestralidade</label><input type="number" min="1" max="12" id="bv-parcelas" value="${esc(cfg.bvParcelas||'6')}"></div>
+    <div class="fg"><label>1ª mensalidade (renovação) é referente a</label><select id="bv-mes">${['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'].map(function(m){ return '<option'+((cfg.bvMesPrimeira||'')===m?' selected':'')+'>'+m+'</option>'; }).join('')}</select></div>
   </div>
   <button class="btn bp bpq" style="margin-top:8px" onclick="salvarBvCfg()">Salvar dados do semestre</button>
 </div>
 
 <div class="tw" style="padding:14px 16px;margin-bottom:14px">
   <h3 style="font-size:14px;margin-bottom:4px">✍️ Mensagens de boas-vindas</h3>
-  <p style="font-size:12px;color:var(--ct);margin-bottom:8px">Variáveis: {nome} {curso} {ciclo} {inicio_aulas} {venc_dia} {primeiro_venc} {link_calendario} {link_financeiro}</p>
+  <p style="font-size:12px;color:var(--ct);margin-bottom:8px">Variáveis: {nome} {curso} {ciclo} {inicio_aulas} {num_parcelas} {mes_primeira}</p>
   <div class="fg"><label>WhatsApp</label><textarea id="bv-tpl-wpp" rows="12" style="width:100%;font-size:13px">${esc(t.wpp)}</textarea></div>
   <div class="fg"><label>Assunto do e-mail</label><input id="bv-tpl-assunto" style="width:100%" value="${esc(t.assunto)}"></div>
   <div class="fg"><label>E-mail</label><textarea id="bv-tpl-email" rows="12" style="width:100%;font-size:13px">${esc(t.email)}</textarea></div>
@@ -7188,10 +7176,8 @@ ${fila.slice(0,300).map(function(a){ return '<tr style="border-top:1px solid var
 function salvarBvCfg() {
   atualizarCicloCfg(S.periodo, {
     bvInicio: inputParaPrazo(document.getElementById('bv-inicio').value || ''),
-    bvVencDia: (document.getElementById('bv-venc').value || '').trim(),
-    bvPrimeiroVenc: inputParaPrazo(document.getElementById('bv-primeiro').value || ''),
-    bvLinkCal: (document.getElementById('bv-linkcal').value || '').trim(),
-    bvLinkFin: (document.getElementById('bv-linkfin').value || '').trim(),
+    bvParcelas: (document.getElementById('bv-parcelas').value || '').trim(),
+    bvMesPrimeira: document.getElementById('bv-mes').value || '',
   });
   mostrarToast('&#10003; Dados do semestre salvos para toda a equipe.');
   rBoasVindas();
@@ -7216,8 +7202,8 @@ function abrirLoteBoasVindas(canal) {
   var fila = filaBoasVindas();
   if(!fila.length) { mostrarToast('Nenhum renovado na fila.'); return; }
   var cfg = getCicloCfg()[S.periodo] || {};
-  if(!cfg.bvInicio || !cfg.bvVencDia || !cfg.bvPrimeiroVenc || !cfg.bvLinkCal) {
-    if(!confirm('Faltam datas ou o link do calendário. As mensagens vão sair com campos vazios. Continuar?')) return;
+  if(!cfg.bvInicio || !cfg.bvParcelas || !cfg.bvMesPrimeira) {
+    if(!confirm('Faltam dados do semestre (início das aulas, nº de mensalidades ou mês da 1ª mensalidade). As mensagens vão sair com campos vazios. Continuar?')) return;
   }
   var t = getBvTpl();
   LOTE = { base: fila, canal: canal, fila: [], idx: 0, ok: 0, erro: 0, pulados: 0, erros: [], rodando: false, parar: false,
