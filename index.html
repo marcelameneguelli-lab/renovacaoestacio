@@ -985,8 +985,13 @@ function idxCiclos() {
 }
 function cicloDoAc(ac) {
   if(!ac) return '';
-  if(ac.ciclo) return normCiclo(ac.ciclo);
   var cands = idxCiclos()[String(ac.alunoId)] || [];
+  if(ac.ciclo) {
+    var cg = normCiclo(ac.ciclo);
+    // Ciclo gravado errado (aluno não está nessa base, mas está em outra): corrige
+    if(cands.length && cands.indexOf(cg) < 0) return cands.length === 1 ? cands[0] : cands.slice().sort().pop();
+    return cg;
+  }
   if(cands.length === 1) return cands[0];
   var pool = cands.length ? cands : cicloLista();
   var dAc = prazoParaDate(ac.data);
@@ -1000,6 +1005,12 @@ function cicloDoAc(ac) {
     if(melhor) return melhor;
   }
   return pool.slice().sort().pop() || S.periodo;
+}
+// Follow-ups pendentes: MESMA regra para o aviso vermelho, o resumo do
+// Dashboard, o contador do menu e o kanban (ciclo selecionado ou todos).
+function fuPendentes() {
+  var base = (window._fuCiclo === 'todos') ? ACIONAMENTOS : acsCiclo();
+  return base.filter(function(a){ return a.fuData && parseFuData(a.fuData) && !fuConcluido(a); });
 }
 var _acsCache = { k: '', v: [] };
 function acsCiclo(c) {
@@ -1385,8 +1396,9 @@ window._fuAlertados = window._fuAlertados || new Set();
 
 function checkAlertas() {
   const hoje = new Date(); hoje.setHours(0,0,0,0);
-  const fuHoje  = ACIONAMENTOS.filter(a=>a.fuData && parseFuData(a.fuData) && parseFuData(a.fuData).getTime()===hoje.getTime() && !fuConcluido(a));
-  const fuAtras = ACIONAMENTOS.filter(a=>a.fuData && parseFuData(a.fuData) && parseFuData(a.fuData)<hoje && !fuConcluido(a));
+  const _pend   = fuPendentes();
+  const fuHoje  = _pend.filter(a=>parseFuData(a.fuData).getTime()===hoje.getTime());
+  const fuAtras = _pend.filter(a=>parseFuData(a.fuData)<hoje);
   const tot = fuHoje.length + fuAtras.length;
 
   // Alerta sonoro: apenas para follow-ups ATRIBUÍDOS A MIM que ainda não foram alertados
@@ -1433,14 +1445,16 @@ function checkAlertas() {
 
   bar.classList.add('on');
   lista.innerHTML = '';
-  fuAtras.slice(0,3).forEach(a=>{
-    const al=ALUNOS.find(x=>x.id===a.alunoId); if(!al) return;
-    lista.innerHTML+=`<div class="alitem"><span class="badge bvm" style="font-size:10px">ATRASADO</span> <strong>${al.nome}</strong> — foi ${a.fuData} <button class="btn bp bpq" style="margin-left:6px" onclick="abrirAluno('${al.id}')">Ver</button></div>`;
-  });
-  fuHoje.slice(0,3).forEach(a=>{
-    const al=ALUNOS.find(x=>x.id===a.alunoId); if(!al) return;
-    lista.innerHTML+=`<div class="alitem"><strong>${al.nome}</strong> — Follow-up HOJE: ${a.fuTipo} <button class="btn bp bpq" style="margin-left:6px" onclick="abrirAluno('${al.id}')">Ver</button></div>`;
-  });
+  function _bannerItem(a, rotulo) {
+    const al = ALUNOS.find(x=>String(x.id)===String(a.alunoId));
+    const nome = al ? al.nome : (a.nomeAluno || 'Aluno #' + a.alunoId);
+    const idFu = String(a.id).replace(/[^\w.-]/g,'');
+    return `<div class="alitem">${rotulo} <strong>${nome}</strong> — ${parseFuData(a.fuData).toLocaleDateString('pt-BR')}`
+      + (al ? ` <button class="btn bp bpq" style="margin-left:6px" onclick="abrirAluno('${al.id}')">Ver</button>` : '')
+      + ` <button class="btn bv bpq" style="margin-left:4px" onclick="concluirFu('${idFu}')">&#10003; OK</button></div>`;
+  }
+  fuAtras.slice(0,3).forEach(a=>{ lista.innerHTML += _bannerItem(a, '<span class="badge bvm" style="font-size:10px">ATRASADO</span>'); });
+  fuHoje.slice(0,3).forEach(a=>{ lista.innerHTML += _bannerItem(a, '<span class="badge bla" style="font-size:10px">HOJE</span>'); });
 }
 
 // ═══════════════════════════════════════════
@@ -1479,7 +1493,7 @@ function calcCurvaStats(periodoNome) {
 function _buildDashFu() {
   var _hoje = new Date(); _hoje.setHours(0,0,0,0);
   var _amanha = new Date(_hoje); _amanha.setDate(_hoje.getDate()+1);
-  var _fu = ACIONAMENTOS.filter(function(a){ return a.fuData && !fuConcluido(a); });
+  var _fu = fuPendentes();
   if(!_fu.length) return '';
 
   var _atras = _fu.filter(function(f){ return parseFuData(f.fuData) && parseFuData(f.fuData) < _hoje; });
@@ -1495,7 +1509,7 @@ function _buildDashFu() {
 
   return '<div style="margin-top:14px">'
     + '<div style="font-size:11px;color:var(--ct);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px;display:flex;align-items:center;gap:8px">'
-    + 'Follow-Ups Pendentes ('+_fu.length+')'
+    + 'Follow-Ups Pendentes ('+_fu.length+') · ' + (window._fuCiclo==='todos' ? 'todos os ciclos' : 'ciclo ' + S.periodo)
     + '<a onclick="ir(&quot;followup&quot;)" style="color:var(--azm);cursor:pointer;font-size:11px;text-transform:none;letter-spacing:0;margin-left:auto">ver detalhes →</a>'
     + '</div>'
     + '<div style="display:flex;gap:10px;flex-wrap:wrap">'
@@ -3358,7 +3372,7 @@ function rFollowup() {
 
   // Follow-ups: acionamentos com fuData pendente (de todos os atendentes),
   // do ciclo selecionado ou de todos os ciclos
-  let fu = (cicloFiltro === 'todos' ? ACIONAMENTOS : acsCiclo()).filter(a=>a.fuData && !fuConcluido(a))
+  let fu = fuPendentes()
     .sort((a,b)=>(parseFuData(a.fuData)||0)-(parseFuData(b.fuData)||0));
 
   if(filtroAtual === 'meus' && S.colab) {
@@ -3385,7 +3399,7 @@ function rFollowup() {
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
         <div style="min-width:0">
           <div style="font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${nome}</div>
-          <div style="font-size:11px;color:var(--ct);margin-top:1px">${f.fuTipo||'Follow-up'} · ${f.fuData}${cicloFiltro==='todos'?` · <span class="badge ${outroCiclo?'bla':'baz'}" style="font-size:9px">${cicloFu}</span>`:''}</div>
+          <div style="font-size:11px;color:var(--ct);margin-top:1px">${f.fuTipo||'Follow-up'} · ${(parseFuData(f.fuData)||{toLocaleDateString:()=>f.fuData}).toLocaleDateString('pt-BR')}${cicloFiltro==='todos'?` · <span class="badge ${outroCiclo?'bla':'baz'}" style="font-size:9px">${cicloFu}</span>`:''}</div>
           <div style="font-size:11px;color:var(--ct)">Agendado por: ${f.colab||'—'}</div>
           <div style="font-size:11px;margin-top:2px">
             <span class="badge ${ehMeu?'bvd':'baz'}" style="font-size:10px">${ehMeu?'Para mim':'Para: '+responsavel}</span>
@@ -3425,7 +3439,7 @@ function rFollowup() {
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
   <h2 style="font-size:15px;font-weight:700">🔔 Follow-Ups Pendentes <span style="color:var(--ct);font-weight:400">(${total})</span></h2>
   <div style="display:flex;gap:6px;align-items:center">
-    <select onchange="window._fuCiclo=this.value;rFollowup()" style="font-size:12px;padding:5px 8px;border-radius:6px;border:1px solid var(--cbr)">
+    <select onchange="window._fuCiclo=this.value;rFollowup();checkAlertas()" style="font-size:12px;padding:5px 8px;border-radius:6px;border:1px solid var(--cbr)">
       <option value="atual" ${cicloFiltro==='atual'?'selected':''}>Ciclo ${S.periodo}</option>
       <option value="todos" ${cicloFiltro==='todos'?'selected':''}>Todos os ciclos</option>
     </select>
