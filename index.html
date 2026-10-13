@@ -93,6 +93,26 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:var(--cb);color:var(--tx
 .sb-badge{margin-left:auto;min-width:20px;text-align:center;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:700;color:#fff}
 .sb-badge.vm{background:#E74C3C}.sb-badge.la{background:#E67E22}.sb-badge.vd{background:#27AE60}
 #nd-alunos{display:none!important}
+body:not(.perfil-admin) .so-admin{display:none!important}
+body:not(.perfil-admin):not(.perfil-coordenador) .so-gestao{display:none!important}
+.sb-sair{margin:8px 0 2px;width:100%;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);color:#fff;border-radius:6px;padding:5px 8px;font-size:12px;cursor:pointer;font-family:inherit}
+.sb-sair:hover{background:rgba(255,255,255,.2)}
+#login-wrap{position:fixed;inset:0;z-index:10000;background:var(--az);display:none;align-items:center;justify-content:center;padding:16px}
+#login-wrap.on{display:flex}
+#login-box{background:#fff;border-radius:14px;width:100%;max-width:380px;padding:28px 26px;box-shadow:0 20px 60px rgba(0,0,0,.25)}
+#login-box h2{font-size:20px;color:var(--az);margin-top:6px}
+#login-box small{display:block;color:var(--ct);font-size:12px;margin-bottom:18px}
+#login-box label{margin-top:12px}
+#login-box input{width:100%;padding:9px 11px;font-size:14px}
+#login-box .btn{width:100%;justify-content:center;padding:10px;margin-top:16px;font-size:14px}
+.lg-erro{display:none;margin-top:10px;background:var(--vmb);color:var(--vm);border-radius:6px;padding:8px 10px;font-size:12px}
+.lg-dica{font-size:11px;color:var(--ct);margin-top:12px;text-align:center}
+body.dark #login-box{background:#161b22}
+.usr-linha{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;border:1px solid var(--cbr);border-radius:9px;margin-bottom:8px;background:#fff}
+.usr-linha.inativo{opacity:.55;background:var(--cb)}
+body.dark .usr-linha{background:#161b22}
+.usr-senha{background:var(--vdb);border:1px solid var(--vd);border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:12px}
+.usr-senha code{font-size:16px;font-weight:700;letter-spacing:1px;background:#fff;border-radius:5px;padding:2px 8px}
 .tb-busca{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--cbr);background:var(--cb);color:var(--ct);border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;font-family:inherit}
 .tb-busca:hover{border-color:var(--azm);color:var(--az)}
 .tb-busca kbd{background:#fff;border:1px solid var(--cbr);border-radius:4px;padding:0 5px;font-size:10px;font-family:monospace}
@@ -393,6 +413,34 @@ window.addEventListener('unhandledrejection', function(e) {
   console.warn('[PROMISE]', e.reason && e.reason.message || e.reason);
 });
 </script>
+<!-- LOGIN -->
+<div id="login-wrap">
+  <div id="login-box">
+    <div style="font-size:30px">🎓</div>
+    <h2>RenovaVR</h2>
+    <small>Renovação de Matrícula · Estácio Volta Redonda</small>
+    <div id="login-form">
+      <label for="lg-email">E-mail institucional</label>
+      <input type="email" id="lg-email" autocomplete="username" placeholder="nome@estacio.br">
+      <label for="lg-senha">Senha</label>
+      <input type="password" id="lg-senha" autocomplete="current-password">
+      <div id="lg-erro" class="lg-erro"></div>
+      <button class="btn bp" id="lg-btn" onclick="fazerLoginSistema()">Entrar</button>
+      <p class="lg-dica">Esqueceu a senha? Peça para a coordenação gerar uma nova.</p>
+    </div>
+    <div id="troca-form" style="display:none">
+      <div id="tr-titulo" style="font-weight:700;font-size:15px;margin-bottom:4px">Crie sua senha pessoal</div>
+      <p style="font-size:12px;color:var(--ct)">Pelo menos 8 caracteres, com letras e números. Não compartilhe com ninguém.</p>
+      <div id="tr-atual-wrap"><label for="tr-atual">Senha atual</label><input type="password" id="tr-atual" autocomplete="current-password"></div>
+      <label for="tr-nova">Nova senha</label><input type="password" id="tr-nova" autocomplete="new-password">
+      <label for="tr-conf">Repita a nova senha</label><input type="password" id="tr-conf" autocomplete="new-password">
+      <div id="tr-erro" class="lg-erro"></div>
+      <button class="btn bp" id="tr-btn" onclick="salvarTrocaSenha()">Salvar senha e entrar</button>
+      <button class="btn bs" id="tr-cancelar" onclick="cancelarTrocaSenha()" style="display:none;margin-top:8px">Cancelar</button>
+    </div>
+  </div>
+</div>
+
 <div id="app">
 
 <!-- SIDEBAR -->
@@ -421,7 +469,8 @@ window.addEventListener('unhandledrejection', function(e) {
     </div>
   </nav>
   <nav class="sb-foot">
-    <a onclick="ir('config')" id="menu-config"><span class="ic">⚙️</span> Configura&#xE7;&#xF5;es</a>
+    <a onclick="abrirAtendentes()" id="menu-usuarios" style="display:none"><span class="ic">👤</span> Usu&#xE1;rios e perfis</a>
+    <a onclick="ir('config')" id="menu-config" style="display:none"><span class="ic">⚙️</span> Configura&#xE7;&#xF5;es</a>
     <a onclick="abrirAdmin()" id="menu-admin" style="display:none"><span class="ic">🔐</span> Admin</a>
   </nav>
   <div id="online-wrap" style="display:none">
@@ -433,6 +482,7 @@ window.addEventListener('unhandledrejection', function(e) {
       <span> <span id="sb-colab">&#x2014;</span></span>
       <span id="sb-count-hoje" class="sb-count" style="display:none" title="Meus acionamentos hoje">0</span>
     </div>
+    <button class="sb-sair" onclick="sairDoSistema()" title="Encerrar a sessão e apagar os dados deste navegador">⏻ Sair</button>
     <small id="sb-data"></small>
     <div class="rt-badge" style="margin-top:4px" id="rt-status">
       <span class="rt-dot"></span><span id="rt-txt">Ao vivo</span>
@@ -467,7 +517,7 @@ window.addEventListener('unhandledrejection', function(e) {
       <button class="tb-busca" onclick="abrirBuscaGlobal()" title="Buscar aluno (Ctrl+K)">🔍 Buscar aluno <kbd>Ctrl+K</kbd></button>
       <select id="ciclo-sel" onchange="trocarCiclo(this.value)" title="Ciclo de renovação em trabalho" style="font-size:12px;font-weight:700;padding:4px 8px;border-radius:6px;border:1px solid var(--azb);color:var(--az);background:var(--azl)"></select>
       <span id="per-badge" class="badge baz" style="padding:4px 10px;font-size:12px">Prazo</span>
-      <button class="btn bs bpq" onclick="exportCSV()">v CSV</button>
+      <button class="btn bs bpq so-gestao" onclick="exportCSV()">⬇ CSV</button>
       <button class="dark-toggle" onclick="toggleDarkMode()" title="Modo escuro (Alt+D)" id="dark-btn">🌑</button>
       <span id="topbar-user" style="font-size:12px;color:var(--ct)"></span>
       <span id="nd-hoje-badge" style="font-size:11px;color:var(--vd);font-weight:700;display:none">! <span id="nd-hoje">0</span> hoje</span>
@@ -540,7 +590,7 @@ window.addEventListener('unhandledrejection', function(e) {
 <!-- MODAL ATENDENTES -->
 <div class="mo" id="m-atend" style="align-items:center">
   <div class="md" style="max-width:600px">
-    <div class="mh"><h2><i class="fa fa-users"></i> Atendentes Cadastrados</h2><button class="mfc" onclick="fcModal('m-atend')">&#xD7;</button></div>
+    <div class="mh"><h2>👤 Usuários e perfis</h2><button class="mfc" onclick="fcModal('m-atend')">&#xD7;</button></div>
     <div class="mb" id="m-atend-body" style="max-height:78vh;overflow-y:auto"></div>
     <div class="mf"><button class="btn bs" onclick="fcModal('m-atend')">Fechar</button></div>
   </div>
@@ -583,9 +633,6 @@ window.addEventListener('unhandledrejection', function(e) {
 
 const VERSAO_SISTEMA = '2.1.0 · menu e acessos · 12/10/2026';
 const EMAIL_RELATORIO_DIARIO = 'marques.marcela@estacio.br';
-const ADMIN_EMAIL_FIXO = 'marcela.meneguelli@gmail.com';
-const ADMIN_PASS_FIXO  = 'estacio2026';
-const ADMIN_NOME_FIXO  = 'Marcela Meneguelli';
 
 // ═══════════════════════════════════════════
 //  ESTADO
@@ -598,8 +645,7 @@ const S = {
   metaFinal: parseInt(localStorage.getItem('metaFinal')||'300'),
   metaDia:   parseInt(localStorage.getItem('metaDia')  ||'15'),
   numAtend:  parseInt(localStorage.getItem('numAtend') ||'5'),
-  adminEmail: ADMIN_EMAIL_FIXO,
-  adminPass:  ADMIN_PASS_FIXO,
+  adminEmail: 'marques.marcela@estacio.br',
   curvas:    JSON.parse(localStorage.getItem('curvas')||'{}'),
   pg: 1, ipp: 20,
   fil: {
@@ -1288,6 +1334,7 @@ function fmtVal(v) { return Number(v||0).toLocaleString('pt-BR',{minimumFraction
 const TELAS = ['dash','alunos','envios','followup','importar','renovados','relatorios','evasao','boasvindas','produtividade','config'];
 const TITULOS = {dash:'Dashboard',alunos:'Lista de Alunos',envios:'Central de Envios',followup:'Follow-Up',importar:'Importar Base',renovados:'Historico',relatorios:'Relatorios de Acionamentos',evasao:'Relatório de Evasão',boasvindas:'Boas-vindas aos Renovados',produtividade:'Produtividade',config:'Configuracoes'};
 function ir(t) {
+  if(!podeVer(t)) { mostrarToast('Seu perfil não tem acesso a esta tela.'); t = 'dash'; }
   TELAS.forEach(x=>document.getElementById('tela-'+x).style.display='none');
   document.getElementById('tela-'+t).style.display='block';
   document.querySelectorAll('#sb nav a').forEach(el=>{el.classList.remove('on');if((el.getAttribute('onclick')||'')==="ir('"+t+"')")el.classList.add('on')});
@@ -1936,7 +1983,7 @@ function rDash() {
   }
 
 function buCard(label, emoji, color, st) {
-    if(!st) return `<div class="bu-card" style="border-top:3px solid ${color}"><div class="bu-title">${emoji} ${label}</div><div style="color:var(--ct);font-size:13px;padding:10px 0">Sem curva carregada para este período.<br><button class="btn bp bpq" style="margin-top:8px" onclick="ir('importar')">Importar Curva</button></div></div>`;
+    if(!st) return `<div class="bu-card" style="border-top:3px solid ${color}"><div class="bu-title">${emoji} ${label}</div><div style="color:var(--ct);font-size:13px;padding:10px 0">Sem curva carregada para este período.<br><button class="btn bp bpq so-gestao" style="margin-top:8px" onclick="ir('importar')">Importar Curva</button></div></div>`;
     const gapColor = st.gapAtual >= 0 ? 'var(--vd)' : 'var(--vm)';
     const gapSinal = st.gapAtual >= 0 ? '+' : '';
     const progPct  = metaFinal ? Math.min(100, Math.round((st.renAtual/(st.metaFech||1))*100)) : 0;
@@ -1963,8 +2010,8 @@ function buCard(label, emoji, color, st) {
 <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
   <span style="font-size:13px;font-weight:700;color:var(--az)">📅 ${perSel}</span>
   <span class="badge ${cv.dig||cv.pres?'bvd':'bcz'}" style="font-size:11px">Curva ${cv.dig||cv.pres?'carregada':'não carregada'}</span>
-  <button class="btn bs bpq" onclick="ir('importar')">Importar base/curva</button>
-  <button class="btn bs bpq" onclick="ir('config')">⚙️ Ajustar prazo</button>
+  <button class="btn bs bpq so-gestao" onclick="ir('importar')">Importar base/curva</button>
+  <button class="btn bs bpq so-admin" onclick="ir('config')">⚙️ Ajustar prazo</button>
 </div>
 
 <div class="cms">
@@ -1994,7 +2041,7 @@ ${buildRitmoCard()}
 <div style="margin-top:14px">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
     <div style="font-size:11px;color:var(--ct);text-transform:uppercase;letter-spacing:.4px">Meta por Modalidade · geral: ${ren}/${metaFinal}</div>
-    <a onclick="ir('config')" style="font-size:11px;color:var(--azm);cursor:pointer">✏️ Definir metas</a>
+    <a class="so-admin" onclick="ir('config')" style="font-size:11px;color:var(--azm);cursor:pointer">✏️ Definir metas</a>
   </div>
   <div style="display:flex;gap:10px;flex-wrap:wrap">
     ${metaPorCategoria('modalidade').map(g=>miniMetaCard(g,'var(--az)')).join('') || '<div style="color:var(--ct);font-size:12px;padding:10px">Sem dados de modalidade nesta base.</div>'}
@@ -2004,7 +2051,7 @@ ${buildRitmoCard()}
 <div style="margin-top:14px">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
     <div style="font-size:11px;color:var(--ct);text-transform:uppercase;letter-spacing:.4px">Meta por BU</div>
-    <a onclick="ir('config')" style="font-size:11px;color:var(--azm);cursor:pointer">✏️ Definir metas</a>
+    <a class="so-admin" onclick="ir('config')" style="font-size:11px;color:var(--azm);cursor:pointer">✏️ Definir metas</a>
   </div>
   <div style="display:flex;gap:10px;flex-wrap:wrap">
     ${metaPorCategoria('bu').map(g=>miniMetaCard(g,'#7B2FBE')).join('') || '<div style="color:var(--ct);font-size:12px;padding:10px">Sem dados de BU nesta base.</div>'}
@@ -2205,7 +2252,7 @@ function rAlunos() {
         <div style="font-size:48px;margin-bottom:12px"></div>
         <h2 style="font-size:18px;margin-bottom:8px">Base ainda não importada</h2>
         <p style="font-size:14px;margin-bottom:20px">Importe o CSV diário para começar a trabalhar.</p>
-        <button class="btn bp" onclick="ir('importar')">📥 Ir para Importação</button>
+        <button class="btn bp so-gestao" onclick="ir('importar')">📥 Ir para Importação</button>
       </div>`;
     return;
   }
@@ -2264,7 +2311,7 @@ function rAlunos() {
     <button class="btn bs" onclick="limparFiltros()" style="white-space:nowrap">
       ✖ Limpar${filAtivos?' ('+filAtivos+')':''}
     </button>
-    <button class="btn bs bpq" onclick="exportCSV()" style="white-space:nowrap">⬇ CSV</button>
+    <button class="btn bs bpq so-gestao" onclick="exportCSV()" style="white-space:nowrap">⬇ CSV</button>
     <button class="btn bp bpq" onclick="abrirEnvioLote()" style="white-space:nowrap" title="Enviar mensagem para todos os alunos do filtro atual">📣 Envio em lote</button>
     <span style="font-size:12px;color:var(--ct);white-space:nowrap">${lista.length} alunos</span>
   </div>
@@ -2622,7 +2669,7 @@ function abrirAluno(id) {
     </div>
     <div class="fg">
       <label>Colaborador</label>
-      <input type="text" id="colab-ac" value="${S.colab||''}" placeholder="${S.colab?S.colab:'Configure seu nome em Configurações'}"
+      <input type="text" id="colab-ac" ${S.perfil==='admin'?'':'readonly'} value="${S.colab||''}" placeholder="${S.colab?S.colab:'Configure seu nome em Configurações'}"
         style="width:100%" oninput="this.dataset.manual='1'">
       ${!S.colab?'<div style="font-size:11px;color:var(--vm);margin-top:2px">⚙️ <a onclick="ir(\'config\')" style="cursor:pointer;color:var(--vm)">Configurar meu nome</a></div>':''}
     </div>
@@ -2828,7 +2875,7 @@ function abrirEnvioModal(canal, tplId) {
 </div>
 <div class="fg">
   <label>Seu nome (colaborador)</label>
-  <input type="text" id="colab-envio" value="${S.colab}" placeholder="Seu nome" style="width:100%">
+  <input type="text" id="colab-envio" ${S.perfil==='admin'?'':'readonly'} value="${S.colab}" placeholder="Seu nome" style="width:100%">
 </div>
 ${canal==='wpp'?`<div style="background:#E8FBF0;border:1px solid #25D366;border-radius:8px;padding:11px;font-size:13px">
   <strong style="color:#128C7E">💬 Como enviar via WhatsApp:</strong><br>
@@ -3406,9 +3453,9 @@ function importarDoDrive() {
   // Via GAS (que tem acesso ao Drive)
   const gasUrl = localStorage.getItem('gasUrl');
   if(gasUrl) {
-    fetch(gasUrl+'?acao=exportar_csv').then(r=>r.text()).then(csv=>{
-      const blob = new Blob([csv]);
-      processCSV(new File([blob],'base.csv',{type:'text/csv'}));
+    gasPost('importar_drive', {}).then(d=>{
+      if(d && d.ok) { mostrarToast('✅ Importação do Drive concluída. Atualizando a base...'); recarregarBaseGAS(); }
+      else mostrarToast('❌ ' + ((d && d.erro) || 'Erro ao importar do Drive.'));
     }).catch(()=>mostrarToast('❌ Erro ao buscar do Drive. Verifique a URL do GAS.'));
   } else {
     mostrarToast('&#9888;️ Configure o Google Apps Script em Configurações para importação automática.');
@@ -3965,7 +4012,7 @@ function rConfig() {
   </div>
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
     <button class="btn bp" onclick="salvarConfigPeriodo()">💾 Salvar e Recalcular Meta</button>
-    <button class="btn bs" onclick="abrirAtendentes()">🧑 Gerenciar Atendentes</button>
+    <button class="btn bs" onclick="abrirAtendentes()">🔐 Usuários e perfis</button>
   </div>
   <div id="cfg-ok" style="font-size:12px;color:var(--vd);margin-top:8px;display:none">&#10003; Configurações salvas!</div>
 </div></div>
@@ -3990,38 +4037,15 @@ function rConfig() {
 </div></div>
 
 <!-- ═══ E-MAIL ADMIN ════════════════════════════════════════════ -->
-${sessionStorage.getItem('adminAuth') === S.adminPass && S.adminPass ? `
-<div class="tw"><div class="th2"><strong>E-mail Administrador e Relatório Diário</strong></div><div style="padding:18px">
-  <p style="font-size:13px;color:var(--ct);margin-bottom:12px">O relatório diário de produtividade é enviado automaticamente pelo servidor para <strong>${EMAIL_RELATORIO_DIARIO}</strong>, às 20h de segunda a sexta e às 13h no sábado. O e-mail abaixo é o do acesso administrativo.</p>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
-    <div class="fg"><label>E-mail do administrador</label>
-      <input type="email" id="cfg-admin-email" value="${localStorage.getItem('adminEmail')||ADMIN_EMAIL_FIXO}" placeholder="coordenacao@estacio.br" style="width:100%">
-    </div>
-    <div class="fg"><label>Senha de acesso admin</label>
-      <input type="password" id="cfg-admin-pass" value="${S.adminPass}" placeholder="••••••••" style="width:100%">
-    </div>
-  </div>
-  <div class="fg"><label>Horário do relatório diário</label>
-    <select id="cfg-hora-rel" style="max-width:200px">
-      ${[6,7,8,9,10,17,18,19,20].map(h=>`<option value="${h}" ${parseInt(localStorage.getItem('horaRel')||'18')===h?'selected':''}>${String(h).padStart(2,'0')}:00</option>`).join('')}
-    </select>
-  </div>
-  <div style="background:var(--cb);border-radius:7px;padding:10px 12px;font-size:12px;margin-bottom:10px">
-    <strong>O relatório inclui:</strong> total de acionamentos, renovados, em negociação, taxa de conversão, ranking de atendentes, ritmo vs meta, gap e projeção de fechamento.
-  </div>
+<div class="tw"><div class="th2"><strong>✉️ Relatório diário de produtividade</strong></div><div style="padding:18px">
+  <p style="font-size:13px;color:var(--ct);margin-bottom:12px">Enviado automaticamente pelo servidor para <strong>${EMAIL_RELATORIO_DIARIO}</strong>, às 20h de segunda a sexta e às 13h no sábado. Traz acessos, tempo ativo, acionamentos, renovações, envios e follow-ups em atraso de cada pessoa.</p>
   <div style="display:flex;gap:8px;flex-wrap:wrap">
-    <button class="btn bp" onclick="salvarAdmin()">💾 Salvar</button>
-    <button class="btn bs" onclick="testarRelatorio()">✉️ Enviar relatório agora</button>
-    <button class="btn bs" onclick="abrirAdmin()"><i class="fa fa-lock"></i> Painel Admin</button>
+    <button class="btn bp" onclick="testarRelatorio()">✉️ Enviar o relatório de hoje agora</button>
+    <button class="btn bs" onclick="abrirAtendentes()">🔐 Usuários e perfis</button>
+    <button class="btn bs" onclick="abrirAdmin()">Painel Admin</button>
   </div>
-  <div id="admin-cfg-ok" style="font-size:12px;color:var(--vd);margin-top:8px;display:none">&#10003; Configurações admin salvas!</div>
+  <div id="rel-status" style="font-size:12px;margin-top:8px;min-height:16px"></div>
 </div></div>
-` : `
-<div class="tw"><div class="th2"><strong>🔒 Área Administrativa</strong></div><div style="padding:18px;text-align:center">
-  <p style="font-size:13px;color:var(--ct);margin-bottom:12px">Configurações de e-mail, relatório diário e senha admin ficam ocultas para atendentes comuns. Autentique-se para acessar.</p>
-  <button class="btn bp" onclick="abrirAdmin()"><i class="fa fa-lock"></i> Entrar como Administrador</button>
-</div></div>
-`}
 
 <!-- ═══ GAS + SMTP ══════════════════════════════════════════════ -->
 <div class="tw"><div class="th2"><strong>🔗 Google Apps Script (Tempo Real)</strong></div><div style="padding:16px">
@@ -4047,7 +4071,7 @@ ${sessionStorage.getItem('adminAuth') === S.adminPass && S.adminPass ? `
     <div class="fg"><label>Servidor SMTP</label><input type="text" id="smtp-host" value="${localStorage.getItem('smtpHost')||'smtp.estacio.br'}" style="width:100%"></div>
     <div class="fg"><label>Porta</label><input type="text" id="smtp-port" value="${localStorage.getItem('smtpPort')||'587'}" style="width:100%"></div>
     <div class="fg"><label>Usuário (e-mail Estácio)</label><input type="text" id="smtp-user" value="${localStorage.getItem('smtpUser')||''}" style="width:100%"></div>
-    <div class="fg"><label>Senha</label><input type="password" id="smtp-pass" value="${localStorage.getItem('smtpPass')||''}" style="width:100%"></div>
+    <div class="fg"><label>Senha</label><input type="password" id="smtp-pass" value="" placeholder="Fica guardada só no servidor" style="width:100%"></div>
   </div>
   <div class="fg"><label>Nome do Remetente</label><input type="text" id="smtp-nome" value="${localStorage.getItem('smtpNome')||'Estácio Volta Redonda'}" style="width:100%"></div>
   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
@@ -4073,27 +4097,14 @@ ${sessionStorage.getItem('adminAuth') === S.adminPass && S.adminPass ? `
   <button class="btn bp" onclick="localStorage.setItem('smsToken',document.getElementById('sms-token').value);localStorage.setItem('smsProv',document.getElementById('sms-prov').value);mostrarToast('SMS configurado!')">💾 Salvar</button>
 </div></div>
 
-<div class="tw"><div class="th2"><strong> Minha Identificação</strong></div><div style="padding:16px">
-  <p style="font-size:13px;color:var(--ct);margin-bottom:12px">
-    Este nome será usado automaticamente em todos os acionamentos que você registrar e aparecerá no relatório de produtividade.
-  </p>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
-    <div class="fg">
-      <label>Seu nome <span style="color:var(--vm)">★</span></label>
-      <input type="text" id="cfg-colab" value="${S.colab}" placeholder="Ex: Marcela Meneguelli" style="width:100%"
-        oninput="document.getElementById('prev-colab').textContent=this.value||'—'">
-    </div>
-    <div class="fg">
-      <label>Equipe</label>
-      <input type="text" id="cfg-equipe" value="${S.equipe}" placeholder="Ex: Secretaria" style="width:100%">
-    </div>
-  </div>
+<div class="tw"><div class="th2"><strong>🔐 Minha conta</strong></div><div style="padding:16px">
+  <p style="font-size:13px;color:var(--ct);margin-bottom:12px">Seu nome e perfil vêm do login. Os acionamentos ficam registrados com este nome.</p>
   <div style="background:var(--azl);border-radius:7px;padding:9px 12px;font-size:12px;margin-bottom:12px">
-    Identificado como: <strong id="prev-colab">${S.colab||'—'}</strong>
+    <strong>${escEv(S.colab||'—')}</strong> · ${escEv(S.userEmail||'')} · ${escEv(nomePerfil(S.perfil))}
   </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap">
-    <button class="btn bp" onclick="salvarIdentificacao()">💾 Salvar nome</button>
-    <button class="btn bs" onclick="ir('produtividade')">📊 Ver minha produtividade</button>
+    <button class="btn bs" onclick="mostrarTrocaSenha(true)">🔑 Trocar minha senha</button>
+    <button class="btn bs" onclick="ir('produtividade')">📊 Ver produtividade</button>
   </div>
 </div></div>
 
@@ -4546,12 +4557,11 @@ function salvarSMTP() {
   localStorage.setItem('smtpHost', host);
   localStorage.setItem('smtpPort', port||'587');
   localStorage.setItem('smtpUser', user);
-  localStorage.setItem('smtpPass', pass);
   localStorage.setItem('smtpNome', nome||'Estácio Volta Redonda');
   // Sincronizar com GAS se URL configurada
   const gasUrl = localStorage.getItem('gasUrl');
   if(gasUrl) {
-    fetch(gasUrl, { method:'POST', body: JSON.stringify({ acao:'salvar_smtp', host, port, user, pass, nome }) })
+    gasPost('salvar_smtp', { host, port, user, pass, nome })
       .then(()=>{ document.getElementById('smtp-status').innerHTML='<span style="color:var(--vd)">&#10003; SMTP salvo no GAS com sucesso!</span>'; })
       .catch(()=>{ document.getElementById('smtp-status').innerHTML='<span style="color:var(--la)">&#9888;️ Salvo localmente. GAS não respondeu — verifique a URL.</span>'; });
   } else {
@@ -4566,12 +4576,7 @@ function testarSMTP() {
   if(!user){ mostrarToast('&#9888;️ Salve a configuração SMTP primeiro.'); return; }
   if(!gasUrl){ mostrarToast('&#9888;️ Configure a URL do GAS para testar o envio real.'); return; }
   document.getElementById('smtp-status').innerHTML='<span style="color:var(--azm)">⏳ Enviando e-mail de teste...</span>';
-  fetch(gasUrl, { method:'POST', body: JSON.stringify({
-    acao:'testar_email', destino: user,
-    assunto:'[Teste] Estácio — Sistema de Renovação',
-    corpo:`Este é um e-mail de teste do Sistema de Acionamento de Renovação de Matrícula.\nEnviado em ${new Date().toLocaleString('pt-BR')} por ${S.colab||'Administrador'}.`
-  }) })
-  .then(r=>r.json())
+  gasPost('testar_email', { destino: user, colab: S.colab||'Administrador' })
   .then(d=>{ document.getElementById('smtp-status').innerHTML=d.ok?'<span style="color:var(--vd)">&#10003; E-mail de teste enviado com sucesso! Verifique a caixa de entrada.</span>':'<span style="color:var(--vm)">❌ Erro: '+d.erro+'</span>'; })
   .catch(()=>{ document.getElementById('smtp-status').innerHTML='<span style="color:var(--vm)">❌ GAS não respondeu. Verifique a URL e as permissões do Web App.</span>'; });
 }
@@ -4633,11 +4638,7 @@ function confirmarEnvio() {
     const assunto = document.getElementById('email-assunto')?.value || 'Renovação de Matrícula — Estácio';
     if(gasUrl && localStorage.getItem('smtpHost')) {
       // Envio real via GAS+SMTP
-      fetch(gasUrl, { method:'POST', body: JSON.stringify({
-        acao:'enviar_email', destino, assunto, corpo:msg,
-        remetente: localStorage.getItem('smtpUser'), nomeRem: localStorage.getItem('smtpNome')||'Estácio'
-      }) })
-      .then(r=>r.json())
+      gasPost('enviar_email', { destino, assunto, corpo:msg, ciclo:S.periodo })
       .then(d=>{ mostrarToast(d.ok?`&#10003; E-mail enviado para ${destino}!`:`&#9888;️ Erro GAS: ${d.erro||'verifique configurações'}`); })
       .catch(()=>{ mostrarToast('&#9888;️ GAS indisponível. Abrindo cliente de e-mail...'); window.location.href=`mailto:${destino}?subject=${encodeURIComponent(assunto)}&body=${encodeURIComponent(msg)}`; });
     } else {
@@ -4668,6 +4669,7 @@ function confirmarEnvio() {
 //  EXPORTAR CSV
 // ═══════════════════════════════════════════
 function exportCSV() {
+  if(S.perfil !== 'admin' && S.perfil !== 'coordenador') { mostrarToast('Exportar a base é restrito à coordenação.'); return; }
   const lista = ALUNOS.length ? filtrar() : [];
   if(!lista.length){ mostrarToast('&#9888;️ Nenhum aluno para exportar.'); return; }
   const filAtivos = Object.values(S.fil).filter(v=>v&&v!=='').length;
@@ -4750,16 +4752,142 @@ function abrirSecaoGestao() {
   var sec = document.getElementById('sec-gestao');
   if(sec && sec.classList.contains('fechado')) { sec.classList.remove('fechado'); try { localStorage.setItem('menuGestaoFechado','0'); } catch(e) {} }
 }
-// Gestão aparece para coordenador, para quem entrou como admin e para quem
-// ainda não está no cadastro de atendentes. Some só para atendente e apoio.
+// Telas que cada perfil pode abrir (conferido também no servidor)
+var TELAS_PERFIL = {
+  admin: '*',
+  coordenador: ['dash','alunos','envios','followup','boasvindas','relatorios','produtividade','evasao','renovados','importar'],
+  atendente: ['dash','alunos','envios','followup','boasvindas'],
+  apoio: ['dash','alunos','envios','followup','boasvindas'],
+};
+function nomePerfil(p) { return ({ admin:'Administrador', coordenador:'Coordenador', atendente:'Atendente', apoio:'Apoio' })[p] || 'Atendente'; }
+function podeVer(t) {
+  var l = TELAS_PERFIL[S.perfil] || TELAS_PERFIL.atendente;
+  return l === '*' || l.indexOf(t) >= 0;
+}
 function aplicarMenuPerfil() {
-  var sec = document.getElementById('sec-gestao'); if(!sec) return;
-  var adminOk = S.adminPass && sessionStorage.getItem('adminAuth') === S.adminPass;
-  var at = null;
-  try { at = getAtendentes().find(function(a){ return normalizarNome(a.nome) === normalizarNome(S.colab); }); } catch(e) {}
-  var esconder = !adminOk && at && (at.perfil === 'atendente' || at.perfil === 'apoio' || !at.perfil);
-  sec.style.display = esconder ? 'none' : '';
-  if(localStorage.getItem('menuGestaoFechado') === '1') sec.classList.add('fechado');
+  var p = S.perfil || 'atendente';
+  document.body.classList.remove('perfil-admin','perfil-coordenador','perfil-atendente','perfil-apoio');
+  document.body.classList.add('perfil-' + p);
+  var sec = document.getElementById('sec-gestao');
+  if(sec) {
+    sec.style.display = (p === 'admin' || p === 'coordenador') ? '' : 'none';
+    if(localStorage.getItem('menuGestaoFechado') === '1') sec.classList.add('fechado');
+  }
+  ['menu-config','menu-admin','menu-usuarios'].forEach(function(id) {
+    var el = document.getElementById(id); if(el) el.style.display = p === 'admin' ? 'flex' : 'none';
+  });
+  var tu = document.getElementById('topbar-user');
+  if(tu) tu.textContent = (S.colab || '') + (S.colab ? ' · ' + nomePerfil(p) : '');
+  var sb = document.getElementById('sb-colab'); if(sb) sb.textContent = S.colab || '—';
+}
+
+// ═══════════════════════════════════════════════════════
+//  LOGIN
+// ═══════════════════════════════════════════════════════
+function sessaoAtual() {
+  try {
+    var s = JSON.parse(localStorage.getItem('sessao') || 'null');
+    if(s && s.token && s.exp > Date.now()) return s;
+  } catch(e) {}
+  return null;
+}
+function mostrarLogin(msg) {
+  var w = document.getElementById('login-wrap'); if(!w) return;
+  document.getElementById('login-form').style.display = '';
+  document.getElementById('troca-form').style.display = 'none';
+  var em = document.getElementById('lg-email');
+  if(em && !em.value) em.value = localStorage.getItem('ultimoEmail') || '';
+  document.getElementById('lg-senha').value = '';
+  var er = document.getElementById('lg-erro'); er.textContent = msg || ''; er.style.display = msg ? 'block' : 'none';
+  w.classList.add('on');
+  setTimeout(function(){ (em && em.value ? document.getElementById('lg-senha') : em).focus(); }, 50);
+}
+function erroLogin(id, msg) { var e = document.getElementById(id); e.textContent = msg; e.style.display = 'block'; }
+function fazerLoginSistema() {
+  var email = (document.getElementById('lg-email').value || '').trim().toLowerCase();
+  var senha = document.getElementById('lg-senha').value || '';
+  if(!email || !senha) { erroLogin('lg-erro', 'Informe e-mail e senha.'); return; }
+  if(!localStorage.getItem('gasUrl')) { erroLogin('lg-erro', 'Servidor não configurado neste navegador.'); return; }
+  var btn = document.getElementById('lg-btn'); btn.disabled = true; btn.textContent = 'Entrando...';
+  gasPost('login', { email: email, senha: senha }).then(function(d) {
+    btn.disabled = false; btn.textContent = 'Entrar';
+    if(!d || !d.ok) {
+      var msg = (d && d.erro) || 'Não foi possível entrar.';
+      if(msg.indexOf('desconhecida') >= 0) msg = 'O servidor ainda está na versão antiga. Publique o GAS v6.3.';
+      erroLogin('lg-erro', msg); return;
+    }
+    localStorage.setItem('ultimoEmail', email);
+    localStorage.setItem('sessao', JSON.stringify({ token:d.token, exp:d.exp, nome:d.nome, email:d.email, perfil:d.perfil }));
+    if(d.trocarSenha) { window._senhaAtualTroca = senha; mostrarTrocaSenha(false); return; }
+    entrarNoSistema();
+  }).catch(function(err) {
+    btn.disabled = false; btn.textContent = 'Entrar';
+    erroLogin('lg-erro', 'Falha ao contactar o servidor: ' + err.message);
+  });
+}
+// voluntaria = true quando a pessoa pede para trocar (pede a senha atual)
+function mostrarTrocaSenha(voluntaria) {
+  var w = document.getElementById('login-wrap');
+  document.getElementById('login-form').style.display = 'none';
+  document.getElementById('troca-form').style.display = '';
+  document.getElementById('tr-atual-wrap').style.display = voluntaria ? '' : 'none';
+  document.getElementById('tr-titulo').textContent = voluntaria ? 'Trocar minha senha' : 'Crie sua senha pessoal';
+  document.getElementById('tr-cancelar').style.display = voluntaria ? '' : 'none';
+  ['tr-atual','tr-nova','tr-conf'].forEach(function(id){ document.getElementById(id).value = ''; });
+  document.getElementById('tr-erro').style.display = 'none';
+  window._trocaVoluntaria = !!voluntaria;
+  w.classList.add('on');
+  setTimeout(function(){ document.getElementById(voluntaria ? 'tr-atual' : 'tr-nova').focus(); }, 50);
+}
+function cancelarTrocaSenha() { document.getElementById('login-wrap').classList.remove('on'); }
+function salvarTrocaSenha() {
+  var atual = window._trocaVoluntaria ? document.getElementById('tr-atual').value : (window._senhaAtualTroca || '');
+  var nova = document.getElementById('tr-nova').value, conf = document.getElementById('tr-conf').value;
+  if(nova.length < 8 || !/[A-Za-z]/.test(nova) || !/\d/.test(nova)) { erroLogin('tr-erro', 'Use pelo menos 8 caracteres, com letras e números.'); return; }
+  if(nova !== conf) { erroLogin('tr-erro', 'As duas senhas não são iguais.'); return; }
+  var btn = document.getElementById('tr-btn'); btn.disabled = true;
+  gasPost('trocar_senha', { atual: atual, nova: nova }).then(function(d) {
+    btn.disabled = false;
+    if(!d || !d.ok) { erroLogin('tr-erro', (d && d.erro) || 'Não foi possível trocar a senha.'); return; }
+    window._senhaAtualTroca = '';
+    mostrarToast('✅ Senha alterada.');
+    if(window._trocaVoluntaria) cancelarTrocaSenha(); else entrarNoSistema();
+  }).catch(function(err){ btn.disabled = false; erroLogin('tr-erro', 'Falha ao contactar o servidor: ' + err.message); });
+}
+function entrarNoSistema() {
+  var s = sessaoAtual(); if(!s) { mostrarLogin(); return; }
+  S.colab = s.nome; S.perfil = s.perfil; S.userEmail = s.email;
+  localStorage.setItem('colab', s.nome);
+  window._sessaoAvisada = false;
+  aplicarMenuPerfil();
+  document.getElementById('login-wrap').classList.remove('on');
+  if(!window._sistemaIniciado) {
+    window._sistemaIniciado = true;
+    try { if(window.iniciarSincronizacao) window.iniciarSincronizacao(); } catch(e) { console.error(e); }
+  } else {
+    try { carregarHistoricoGAS(); iniciarRealtime(); registrarAcessoGAS('entrada'); } catch(e) {}
+  }
+  if(!podeVer(window._telaAtiva || 'dash')) ir('dash');
+  else { try { ir(window._telaAtiva || 'dash'); } catch(e) {} }
+}
+function sessaoExpirou() {
+  if(window._sessaoAvisada) return;
+  window._sessaoAvisada = true;
+  localStorage.removeItem('sessao');
+  if(window._rtInterval) { clearInterval(window._rtInterval); window._rtInterval = null; }
+  try { document.querySelectorAll('.mo.on').forEach(function(m){ m.classList.remove('on'); }); } catch(e) {}
+  mostrarLogin(window._sistemaIniciado ? 'Sua sessão terminou. Entre novamente para continuar.' : '');
+}
+// Sair: encerra a sessão e apaga do navegador a base e o histórico guardados
+function sairDoSistema() {
+  var pend = (window._gasQueue || []).length;
+  if(!confirm(pend ? 'Ainda há ' + pend + ' registro(s) sendo enviados ao servidor. Sair mesmo assim? Eles podem ser perdidos.' : 'Sair do sistema? Os dados guardados neste navegador serão apagados.')) return;
+  var fim = function() {
+    ['sessao','bases_cache','alunos_cache','acionamentos_v2','envios_v2','alunos_status','colab','recados','fuConcluidos'].forEach(function(k){ try { localStorage.removeItem(k); } catch(e) {} });
+    location.reload();
+  };
+  gasPost('logout', {}).then(fim, fim);
+  setTimeout(fim, 3000);
 }
 
 function salvarIdentificacao() {
@@ -4784,7 +4912,6 @@ function salvarIdentificacao() {
   const ac = document.getElementById('colab-ac');
   if(ac && !ac.dataset.manual) ac.value = nome;
 
-  try { aplicarMenuPerfil(); } catch(e) {}
   mostrarToast('&#10003; Nome salvo: ' + nome + ' · Seus acionamentos serão registrados com este nome.');
   // Iniciar realtime se GAS configurado e ainda não rodando
   try { registrarAcessoGAS('entrada'); } catch(e) {}
@@ -4806,23 +4933,14 @@ function salvarLogin() {
 //  INIT
 // ═══════════════════════════════════════════
 document.addEventListener('DOMContentLoaded',()=>{
-  // ── ADMIN — sincronizar constantes com state e localStorage ────
-  S.adminEmail = ADMIN_EMAIL_FIXO;
-  S.adminPass  = ADMIN_PASS_FIXO;
-  // Limpar senhas antigas do localStorage que poderiam confundir o login
-  localStorage.setItem('adminEmail', ADMIN_EMAIL_FIXO);
-  localStorage.setItem('adminPass',  ADMIN_PASS_FIXO);
+  // Senhas de versões antigas que ficavam guardadas no navegador
+  ['adminPass','adminEmail','smtpPass'].forEach(function(k){ try { localStorage.removeItem(k); } catch(e) {} });
+  try { sessionStorage.removeItem('adminAuth'); } catch(e) {}
 
   const hj=new Date();
   document.getElementById('sb-data').textContent=hj.toLocaleDateString('pt-BR',{weekday:'short',day:'2-digit',month:'short'});
   document.getElementById('sb-colab').textContent=S.colab||'Não identificado';
   try { renderSeletorCiclo(); } catch(e) {}
-  // ── SEM LOGIN — acesso direto ───────────────────────────────
-  // Sem login — acesso direto
-  if(S.adminEmail && S.adminPass) {
-    const m = document.getElementById('menu-admin');
-    if(m) m.style.display='flex';
-  }
   const _atList = getAtendentes();
   const _atAtivos = _atList.filter(a=>a.ativo && a.contaMeta!==false).length;
   if(_atAtivos > 0) { S.numAtend = _atAtivos; localStorage.setItem('numAtend', String(_atAtivos)); }
@@ -4850,7 +4968,8 @@ document.addEventListener('DOMContentLoaded',()=>{
     console.log('[INIT] URL do GAS atualizada automaticamente (versão ' + GAS_URL_VERSAO + '):', GAS_URL_PADRAO, _urlAntiga ? '(antiga: ' + _urlAntiga + ')' : '');
   }
 
-  // Carregar histórico completo do GAS e iniciar sync
+  // Carregar histórico completo do GAS e iniciar sync (só depois do login)
+  window.iniciarSincronizacao = function() {
   var _gasUrl = localStorage.getItem('gasUrl');
   if(_gasUrl) {
     setTimeout(function() {
@@ -4869,6 +4988,7 @@ document.addEventListener('DOMContentLoaded',()=>{
       mostrarToast('Configure a URL do GAS em Configuracoes para sincronizar os dados.');
     }, 2000);
   }
+  };
   if(!Object.keys(S.curvas).length && typeof CURVAS_DATA !== 'undefined') {
     S.curvas[S.periodo || '2026.1'] = CURVAS_DATA;
     try { localStorage.setItem('curvas', JSON.stringify(S.curvas)); } catch(e) { console.warn('Curvas: quota excedido, dados embutidos serão usados'); }
@@ -4885,10 +5005,14 @@ document.addEventListener('DOMContentLoaded',()=>{
   try { aplicarMenuPerfil(); } catch(e){}
 
   // Atalho ESC
-  document.addEventListener('keydown',e=>{if(e.key==='Escape'){document.querySelectorAll('.mo.on').forEach(m=>m.classList.remove('on'));var bg=document.getElementById('busca-global-wrap');if(bg)bg.classList.remove('on');}});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'){document.querySelectorAll('.mo.on').forEach(m=>m.classList.remove('on'));if(!sessaoAtual())return;var bg=document.getElementById('busca-global-wrap');if(bg)bg.classList.remove('on');}});
   document.querySelectorAll('.mo').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('on')}));
   // Notificação se tem alunos
   if(ALUNOS.length>0) document.getElementById('nd-alunos').style.display='inline-block';
+  // Login: com sessão válida entra direto; sem sessão mostra a tela de login
+  ['lg-email','lg-senha'].forEach(function(id){ var el = document.getElementById(id); if(el) el.addEventListener('keydown', function(e){ if(e.key === 'Enter') fazerLoginSistema(); }); });
+  ['tr-atual','tr-nova','tr-conf'].forEach(function(id){ var el = document.getElementById(id); if(el) el.addEventListener('keydown', function(e){ if(e.key === 'Enter') salvarTrocaSenha(); }); });
+  if(sessaoAtual()) entrarNoSistema(); else mostrarLogin();
 });
 
 // ═══════════════════════════════════════════
@@ -5304,39 +5428,20 @@ function exportProd() {
 //  ADMIN
 // ═══════════════════════════════════════════
 function salvarAdmin() {
-  const email = document.getElementById('cfg-admin-email')?.value?.trim();
-  const pass  = document.getElementById('cfg-admin-pass')?.value;
-  const hora  = document.getElementById('cfg-hora-rel')?.value;
-  if(!email || !pass) { mostrarToast('&#9888;️ Preencha e-mail e senha.'); return; }
-  // Salva como configuração alternativa (não sobrescreve a constante principal)
-  localStorage.setItem('adminEmail', email || ADMIN_EMAIL_FIXO);
-  localStorage.setItem('adminPass',  pass  || ADMIN_PASS_FIXO);
-  localStorage.setItem('horaRel',    hora||'18');
-  // Mostrar menu admin na sidebar
-  const menuAdmin = document.getElementById('menu-admin');
-  if(menuAdmin) menuAdmin.style.display = 'flex';
-  const ok = document.getElementById('admin-cfg-ok');
-  if(ok) { ok.style.display='block'; setTimeout(()=>ok.style.display='none',3000); }
-  mostrarToast(`&#10003; Admin configurado: ${email}`);
+  // Substituído pelo login: o acesso de administrador vem do perfil do usuário.
+  abrirAtendentes();
 }
 
 function abrirAdmin() {
-  if(!S.adminPass) { mostrarToast('&#9888;️ Configure a senha admin em Configurações.'); ir('config'); return; }
-  const sessao = sessionStorage.getItem('adminAuth');
-  if(sessao === S.adminPass) {
-    renderAdmin();
-    abModal('m-admin');
-  } else {
-    abModal('m-admin-login');
-    setTimeout(()=>document.getElementById('admin-login-pass')?.focus(), 200);
-  }
+  if(S.perfil !== 'admin') { mostrarToast('Apenas o administrador acessa o Painel Admin.'); return; }
+  renderAdmin();
+  abModal('m-admin');
 }
 
 function tentarLoginAdmin() {
   const pass = document.getElementById('admin-login-pass')?.value;
-  if(pass === S.adminPass) {
+  if(false) {
     sessionStorage.setItem('adminAuth', pass);
-    try { aplicarMenuPerfil(); } catch(e) {}
     fcModal('m-admin-login');
     renderAdmin();
     abModal('m-admin');
@@ -6204,11 +6309,34 @@ window._gasQueue = window._gasQueue || [];
 // <script src="..."> apontando para o GAS. Tags de script NÃO são
 // sujeitas à política de CORS do navegador — é a mesma técnica usada
 // para carregar bibliotecas de terceiros de qualquer domínio.
+var ACOES_SEM_TOKEN = ['ping', 'login'];
+var ACOES_SENSIVEIS = ['login', 'trocar_senha'];
 function jsonpGas(acao, payload, timeoutMs) {
   timeoutMs = timeoutMs || 20000;
-  return new Promise(function(resolve, reject) {
+  return new Promise(function(resolveOrig, reject) {
     var gasUrl = localStorage.getItem('gasUrl');
-    if(!gasUrl) { resolve({ ok:false, erro:'GAS nao configurado' }); return; }
+    if(!gasUrl) { resolveOrig({ ok:false, erro:'GAS nao configurado' }); return; }
+    // Resposta "sessão expirada" do servidor leva para a tela de login
+    var resolve = function(data) {
+      if(data && data.auth === false && ACOES_SEM_TOKEN.indexOf(acao) < 0) { try { sessaoExpirou(); } catch(e) {} }
+      resolveOrig(data);
+    };
+    if(ACOES_SEM_TOKEN.indexOf(acao) < 0) {
+      var _sess = sessaoAtual();
+      if(!_sess) { try { sessaoExpirou(); } catch(e) {} resolveOrig({ ok:false, auth:false, erro:'Sem sessão' }); return; }
+      payload = Object.assign({}, payload || {}, { token: _sess.token });
+    }
+    // Senha nunca vai na URL: tenta POST; só usa o caminho por URL se o POST falhar
+    if(ACOES_SENSIVEIS.indexOf(acao) >= 0 && !(payload && payload._viaGet)) {
+      fetch(gasUrl, { method:'POST', headers:{ 'Content-Type':'text/plain;charset=utf-8' },
+        body: JSON.stringify(Object.assign({ acao: acao }, payload || {})) })
+        .then(function(r){ return r.text(); })
+        .then(function(t){ resolve(JSON.parse(t)); })
+        .catch(function() {
+          jsonpGas(acao, Object.assign({}, payload || {}, { _viaGet: true }), timeoutMs).then(resolveOrig, reject);
+        });
+      return;
+    }
 
     var dataStr = encodeURIComponent(JSON.stringify(payload || {}));
     var cbName  = '_gasCb_' + Date.now() + '_' + Math.floor(Math.random()*1e6);
@@ -7347,11 +7475,120 @@ function salvarAtendentes(lista) {
 }
 
 function abrirAtendentes() {
-  const modal = document.getElementById('m-atend');
-  if(!modal) return;
-  refreshAtendentesUI();
-  modal.style.display = '';
-  modal.classList.add('on');
+  if(S.perfil !== 'admin') { mostrarToast('Apenas o administrador gerencia usuários.'); return; }
+  window._usrSenha = null;
+  abModal('m-atend');
+  carregarUsuariosAdmin();
+}
+function carregarUsuariosAdmin() {
+  var body = document.getElementById('m-atend-body');
+  if(body) body.innerHTML = '<p style="padding:24px;text-align:center;color:var(--ct)">Carregando usuários...</p>';
+  gasPost('usuarios_listar', {}).then(function(d) {
+    if(!d || !d.ok) { if(body) body.innerHTML = '<p style="padding:24px;color:var(--vm)">' + escEv((d && d.erro) || 'Não foi possível carregar.') + '</p>'; return; }
+    window._usuarios = d.usuarios || [];
+    atualizarAtendentesLocal(window._usuarios);
+    renderAtendentes();
+  }).catch(function(err){ if(body) body.innerHTML = '<p style="padding:24px;color:var(--vm)">Falha: ' + escEv(err.message) + '</p>'; });
+}
+function atualizarAtendentesLocal(lista) {
+  try { localStorage.setItem('atendentes', JSON.stringify(lista)); } catch(e) {}
+  var n = lista.filter(function(a){ return a.ativo && a.contaMeta !== false; }).length;
+  if(n > 0) { S.numAtend = n; localStorage.setItem('numAtend', String(n)); }
+}
+function renderAtendentes() {
+  var body = document.getElementById('m-atend-body'); if(!body) return;
+  var lista = (window._usuarios || []).slice().sort(function(a,b){ return (b.ativo - a.ativo) || a.nome.localeCompare(b.nome); });
+  var semEmail = lista.filter(function(u){ return u.ativo && !u.email; }).length;
+  var opt = function(v, atual){ return ['admin','coordenador','atendente','apoio'].map(function(p){ return '<option value="'+p+'"'+(p===v?' selected':'')+'>'+nomePerfil(p)+'</option>'; }).join(''); };
+  var sh = window._usrSenha;
+  body.innerHTML =
+    (sh ? '<div class="usr-senha" style="margin:14px 18px 0">Senha provisória de <strong>' + escEv(sh.nome) + '</strong>: <code id="usr-senha-cod">' + escEv(sh.senha) + '</code> '
+      + '<button class="btn bs bpq" onclick="copiarSenhaProv()">Copiar</button>'
+      + '<div style="font-size:11px;color:var(--ct);margin-top:6px">Passe para a pessoa (pessoalmente ou por mensagem direta). Ela entra com o e-mail ' + escEv(sh.email) + ' e essa senha, e o sistema pede para criar a senha pessoal. Esta senha não aparece de novo.</div></div>' : '')
+    + '<div style="padding:16px 18px;border-bottom:1px solid var(--cbr)">'
+    + '<div style="font-weight:700;font-size:13px;margin-bottom:8px">Novo usuário</div>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+    + '<input type="text" id="usr-nome" placeholder="Nome" style="flex:1;min-width:140px">'
+    + '<input type="email" id="usr-email" placeholder="nome@estacio.br" style="flex:1;min-width:170px">'
+    + '<select id="usr-perfil">' + opt('atendente') + '</select>'
+    + '<button class="btn bv" onclick="adicionarUsuarioAdmin()">➕ Adicionar</button></div>'
+    + (semEmail ? '<div style="margin-top:10px;font-size:12px;color:var(--la)">⚠️ ' + semEmail + ' pessoa(s) da equipe ainda sem e-mail. Clique em ✏️ para incluir o e-mail e gerar a senha, senão elas não conseguem entrar.</div>' : '')
+    + '</div><div style="padding:14px 18px">'
+    + (lista.length ? lista.map(function(u, i) {
+        var k = escEv(u.email || ('nome:' + u.nome));
+        var eu = u.email && u.email === S.userEmail;
+        return '<div class="usr-linha' + (u.ativo ? '' : ' inativo') + '">'
+          + '<div style="flex:1;min-width:170px"><div style="font-weight:700;font-size:13px">' + escEv(u.nome) + (eu ? ' <span class="badge baz" style="font-size:10px">você</span>' : '') + '</div>'
+          + '<div style="font-size:11px;color:' + (u.email ? 'var(--ct)' : 'var(--la)') + '">' + (u.email ? escEv(u.email) : 'sem e-mail, não consegue entrar') + '</div>'
+          + '<div style="font-size:10px;color:var(--ct)">' + (u.trocarSenha ? '🔑 aguardando primeiro acesso' : (u.ultimoLogin ? 'último acesso ' + escEv(u.ultimoLogin) : 'nunca entrou')) + '</div></div>'
+          + '<select data-k="' + k + '" onchange="alterarUsuarioAdmin(this.dataset.k,{perfil:this.value})" style="font-size:12px"' + (eu ? ' disabled' : '') + '>' + opt(u.perfil) + '</select>'
+          + '<label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--ct);margin:0" title="Entra no cálculo da meta diária"><input type="checkbox" data-k="' + k + '" ' + (u.contaMeta !== false ? 'checked' : '') + ' onchange="alterarUsuarioAdmin(this.dataset.k,{contaMeta:this.checked})"> Conta meta</label>'
+          + '<button class="btn bs bpq" data-k="' + k + '" onclick="editarUsuarioAdmin(this.dataset.k)" title="Editar nome e e-mail">✏️</button>'
+          + (u.email ? '<button class="btn bs bpq" data-k="' + k + '" onclick="resetarSenhaAdmin(this.dataset.k)" title="Gerar nova senha provisória">🔑</button>' : '')
+          + (eu ? '' : '<button class="btn ' + (u.ativo ? 'bs' : 'bv') + ' bpq" data-k="' + k + '" onclick="alterarUsuarioAdmin(this.dataset.k,{ativo:' + (!u.ativo) + '})">' + (u.ativo ? 'Desativar' : 'Ativar') + '</button>')
+          + (eu ? '' : '<button class="btn br2 bpq" data-k="' + k + '" onclick="removerUsuarioAdmin(this.dataset.k)" title="Remover">🗑</button>')
+          + '</div>';
+      }).join('') : '<p style="color:var(--ct);text-align:center;padding:20px">Nenhum usuário.</p>')
+    + '</div>'
+    + '<div style="padding:10px 18px;background:var(--azl);border-top:1px solid var(--azb);font-size:12px;color:var(--az)">'
+    + '<strong>Perfis:</strong> Administrador vê tudo. Coordenador vê Atendimento e Gestão e pode importar a base. Atendente e Apoio veem só Atendimento. Desativar alguém encerra a sessão dessa pessoa na hora.</div>';
+}
+function usuarioPorChave(k) {
+  return (window._usuarios || []).find(function(u){ return k.indexOf('nome:') === 0 ? (!u.email && u.nome === k.substring(5)) : u.email === k; });
+}
+function salvarUsuarioAdmin(u, mudancas) {
+  var dados = Object.assign({ nome:u.nome, email:u.email, perfil:u.perfil, ativo:u.ativo, contaMeta:u.contaMeta,
+    emailOriginal:u.email || '', nomeOriginal:u.nome || '' }, mudancas || {});
+  return gasPost('usuario_salvar', { usuario: dados }).then(function(d) {
+    if(!d || !d.ok) { mostrarToast('⚠️ ' + ((d && d.erro) || 'Não foi possível salvar.')); renderAtendentes(); return d; }
+    window._usuarios = d.usuarios || window._usuarios;
+    atualizarAtendentesLocal(window._usuarios);
+    if(d.senhaProvisoria) window._usrSenha = { nome:d.usuario.nome, email:d.usuario.email, senha:d.senhaProvisoria };
+    renderAtendentes();
+    mostrarToast('✅ ' + escEv(d.usuario.nome) + ' salvo.');
+    return d;
+  });
+}
+function adicionarUsuarioAdmin() {
+  var nome = (document.getElementById('usr-nome').value || '').trim();
+  var email = (document.getElementById('usr-email').value || '').trim().toLowerCase();
+  var perfil = document.getElementById('usr-perfil').value;
+  if(!nome || !email) { mostrarToast('⚠️ Informe nome e e-mail.'); return; }
+  salvarUsuarioAdmin({ nome:'', email:'', perfil:perfil, ativo:true, contaMeta: perfil === 'atendente' },
+    { nome:nome, email:email, perfil:perfil, emailOriginal:'', nomeOriginal:'' });
+}
+function alterarUsuarioAdmin(k, mudancas) {
+  var u = usuarioPorChave(k); if(!u) return;
+  if(!u.email) { mostrarToast('⚠️ Inclua o e-mail dessa pessoa primeiro (botão ✏️).'); renderAtendentes(); return; }
+  if(mudancas.ativo === false && !confirm('Desativar ' + u.nome + '? A pessoa perde o acesso na hora.')) return;
+  salvarUsuarioAdmin(u, mudancas);
+}
+function editarUsuarioAdmin(k) {
+  var u = usuarioPorChave(k); if(!u) return;
+  var nome = prompt('Nome de ' + u.nome + ':', u.nome); if(nome === null) return;
+  var email = prompt('E-mail institucional (usado no login):', u.email || ''); if(email === null) return;
+  salvarUsuarioAdmin(u, { nome: nome.trim(), email: email.trim().toLowerCase() });
+}
+function resetarSenhaAdmin(k) {
+  var u = usuarioPorChave(k); if(!u) return;
+  if(!confirm('Gerar uma nova senha provisória para ' + u.nome + '? A senha atual deixa de funcionar e a sessão aberta é encerrada.')) return;
+  gasPost('usuario_resetar_senha', { email: u.email }).then(function(d) {
+    if(!d || !d.ok) { mostrarToast('⚠️ ' + ((d && d.erro) || 'Não foi possível gerar.')); return; }
+    window._usrSenha = { nome:u.nome, email:u.email, senha:d.senhaProvisoria };
+    carregarUsuariosAdmin();
+  });
+}
+function removerUsuarioAdmin(k) {
+  var u = usuarioPorChave(k); if(!u) return;
+  if(!confirm('Remover ' + u.nome + '? O histórico de acionamentos continua nos relatórios. Para só bloquear o acesso, use Desativar.')) return;
+  gasPost('usuario_remover', { email: u.email || '', nome: u.nome }).then(function(d) {
+    if(!d || !d.ok) { mostrarToast('⚠️ ' + ((d && d.erro) || 'Não foi possível remover.')); return; }
+    window._usuarios = d.usuarios || []; atualizarAtendentesLocal(window._usuarios); renderAtendentes();
+  });
+}
+function copiarSenhaProv() {
+  var t = (window._usrSenha || {}).senha || '';
+  try { navigator.clipboard.writeText(t); mostrarToast('Senha copiada.'); } catch(e) {}
 }
 
 const PERFIS_ATENDENTE = {
@@ -7360,64 +7597,7 @@ const PERFIS_ATENDENTE = {
   coordenador: { label:'Coordenador', icone:'⭐', cor:'#D68910', metaPadrao:false },
 };
 
-function renderAtendentes() {
-  const lista  = getAtendentes();
-  const ativos = lista.filter(a=>a.ativo).length;
-  const contamMeta = lista.filter(a=>a.ativo && a.contaMeta!==false).length;
-  const body   = document.getElementById('m-atend-body');
-  if(!body) return;
-
-  body.innerHTML = `
-    <div style="padding:16px 18px;border-bottom:1px solid var(--cbr)">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:6px">
-        <div style="font-size:13px;color:var(--ct)">${ativos} ativo(s) · ${lista.length} cadastrado(s)</div>
-        <span class="badge bvd">${contamMeta} contando para meta</span>
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <input type="text" id="at-nome-new" placeholder="Nome da pessoa" style="flex:1;min-width:140px;border:1px solid var(--cbr);border-radius:7px;padding:8px 10px;font-size:13px">
-        <select id="at-perfil-new" style="border:1px solid var(--cbr);border-radius:7px;padding:8px 10px;font-size:13px">
-          <option value="atendente">🎧 Atendente</option>
-          <option value="apoio">📞 Apoio (ligação)</option>
-          <option value="coordenador">⭐ Coordenador</option>
-        </select>
-        <button class="btn bv" onclick="adicionarAtendente()" style="white-space:nowrap">➕ Adicionar</button>
-      </div>
-    </div>
-    <div style="padding:14px 18px;display:flex;flex-direction:column;gap:8px">
-      ${lista.length === 0
-        ? '<p style="color:var(--ct);font-size:13px;text-align:center;padding:20px">Nenhuma pessoa cadastrada ainda.</p>'
-        : lista.map((at, i) => {
-            const perfil = PERFIS_ATENDENTE[at.perfil] || PERFIS_ATENDENTE.atendente;
-            const contaMeta = at.contaMeta !== false;
-            return `
-          <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:9px;background:${at.ativo?'var(--vdb)':'var(--cb)'};border:1px solid ${at.ativo?'#82D9A0':'var(--cbr)'};flex-wrap:wrap">
-            <div style="width:32px;height:32px;border-radius:50%;background:${at.ativo?perfil.cor:'var(--ct)'};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;flex-shrink:0">
-              ${(at.nome||'?')[0].toUpperCase()}
-            </div>
-            <div style="flex:1;min-width:120px">
-              <div style="font-weight:700;font-size:13px">${at.nome}</div>
-              <div style="font-size:11px;color:var(--ct)">${at.ativo?'&#10003; Ativo':'⏸ Inativo'} · ${perfil.icone} ${perfil.label}</div>
-            </div>
-            <select onchange="mudarPerfilAtendente(${i}, this.value)" style="font-size:11px;padding:4px 6px;border-radius:6px;border:1px solid var(--cbr)" title="Função na equipe">
-              <option value="atendente" ${at.perfil==='atendente'||!at.perfil?'selected':''}>🎧 Atendente</option>
-              <option value="apoio" ${at.perfil==='apoio'?'selected':''}>📞 Apoio</option>
-              <option value="coordenador" ${at.perfil==='coordenador'?'selected':''}>⭐ Coordenador</option>
-            </select>
-            <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--ct);cursor:pointer;white-space:nowrap" title="Se marcado, essa pessoa entra no cálculo da meta diária">
-              <input type="checkbox" ${contaMeta?'checked':''} onchange="toggleContaMeta(${i}, this.checked)"> Conta meta
-            </label>
-            <button class="btn bs bpq" onclick="editarAtendente(${i})" style="font-size:12px" title="Renomear e mesclar histórico duplicado">✏️</button>
-            <button class="btn ${at.ativo?'bs':'bv'} bpq" onclick="toggleAtendente(${i})" style="font-size:12px">
-              ${at.ativo?'Desativar':'Ativar'}
-            </button>
-            <button class="btn br2 bpq" onclick="removerAtendente(${i})" style="font-size:12px">🗑</button>
-          </div>`;
-          }).join('')}
-    </div>
-    <div style="padding:10px 18px;background:var(--azl);border-top:1px solid var(--azb);font-size:12px;color:var(--az)">
-      ℹ️ Apenas pessoas <strong>ativas</strong> e marcadas com <strong>"Conta meta"</strong> entram no cálculo da meta diária. Coordenadores e Apoio geralmente não têm meta própria, mas continuam aparecendo em Follow-Up e Produtividade.
-    </div>`;
-}
+// (tela antiga de atendentes substituída por Usuários e perfis)
 
 function mudarPerfilAtendente(idx, perfil) {
   const lista = getAtendentes();
