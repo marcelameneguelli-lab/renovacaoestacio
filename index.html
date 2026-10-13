@@ -3822,7 +3822,7 @@ function parseDataBR(dataStr) {
 }
 
 function rRelatorios() {
-  const colabs = [...new Set(ACIONAMENTOS.map(a=>a.colab).filter(Boolean))].sort();
+  const colabs = [...new Set(ACIONAMENTOS.map(a=>a.colab).filter(Boolean))].sort(); // lista do relatório
   const statusOpcoes = ['Renovado','Em negociação','Trancamento','Evadido','Pendente'];
   const f = window._relFiltros || { status:'todos', colab:'todos', dataIni:'', dataFim:'', busca:'' };
 
@@ -5033,52 +5033,50 @@ function rProdutividade() {
   }, 50);
 }
 
+// Acionamento gerado automaticamente por envio em lote: conta como envio, não como atendimento
+function acEhLote(ac) { return /^envio em (lote|massa):/i.test(String(ac && ac.obs || '').trim()); }
+// Data do acionamento (DD/MM/AAAA, AAAA-MM-DD ou ISO). Se vier invertida (MM/DD), corrige.
+function dataDoAc(ac) {
+  var s = String(ac && ac.data || '').trim(); if(!s) return null;
+  var d = null;
+  if(s.indexOf('/') >= 0) {
+    var p = s.split('/'); var dd = parseInt(p[0]), mm = parseInt(p[1]), aa = parseInt(p[2]);
+    if(mm > 12 && dd <= 12) { var t = dd; dd = mm; mm = t; }
+    d = new Date(aa, mm - 1, dd);
+  } else if(/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    d = new Date(parseInt(s.substr(0,4)), parseInt(s.substr(5,2)) - 1, parseInt(s.substr(8,2)));
+  }
+  return d && !isNaN(d.getTime()) ? d : null;
+}
+function inicioPeriodoProd(filtroPer) {
+  var ini = new Date(); ini.setHours(0,0,0,0);
+  if(filtroPer === '7d') ini.setDate(ini.getDate() - 6);
+  else if(filtroPer === '15d') ini.setDate(ini.getDate() - 14);
+  else if(filtroPer === '30d') ini.setDate(ini.getDate() - 29);
+  else if(filtroPer === 'mes') ini.setDate(1);
+  return ini;
+}
 function calcProdData(filtroPer, filtroColab, filtroPerfil) {
-  // Filtrar acionamentos pelo período e colaborador
   let acs = window._prodTodosCiclos ? [...ACIONAMENTOS] : [...acsCiclo()];
 
   if(filtroPer && filtroPer !== 'todos') {
-    const hoje = new Date(); hoje.setHours(23,59,59,999); // incluir o dia inteiro
-    const ini  = new Date();
-    if(filtroPer === 'hoje') {
-      ini.setHours(0,0,0,0);
-    } else if(filtroPer === '7d') {
-      ini.setDate(hoje.getDate()-7);
-    } else if(filtroPer === '15d') {
-      ini.setDate(hoje.getDate()-15);
-    } else if(filtroPer === '30d') {
-      ini.setDate(hoje.getDate()-30);
-    } else if(filtroPer === 'mes') {
-      ini.setDate(1); ini.setHours(0,0,0,0);
-    }
-    acs = acs.filter(a => {
-      if(!a.data) return false;
-      // Suporte a DD/MM/YYYY, YYYY-MM-DD e ISO completo (YYYY-MM-DDTHH:mm:ss...)
-      // — blindado contra tipos não-string e contra data já vir com horário
-      // (o Google Sheets às vezes tipifica a coluna Data como Date de verdade,
-      // que ao virar JSON chega como ISO completo, ex: "2026-09-07T00:00:00.000Z")
-      const dataStr = String(a.data);
-      let dt;
-      if(dataStr.includes('/')) {
-        const p = dataStr.split('/');
-        // DD/MM/YYYY
-        dt = new Date(p[2]+'-'+p[1].padStart(2,'0')+'-'+p[0].padStart(2,'0')+'T00:00:00');
-      } else if(dataStr.includes('T')) {
-        // Já é ISO completo — usar só a parte da data, sem concatenar de novo
-        dt = new Date(dataStr.substring(0,10)+'T00:00:00');
-      } else {
-        dt = new Date(dataStr+'T00:00:00');
-      }
-      return !isNaN(dt) && dt >= ini && dt <= hoje;
-    });
+    const ini = inicioPeriodoProd(filtroPer);
+    const fim = new Date(); fim.setHours(23,59,59,999);
+    acs = acs.filter(a => { const d = dataDoAc(a); return d && d >= ini && d <= fim; });
   }
 
+  // Mesmo nome escrito de jeitos diferentes conta como uma pessoa só
+  const atendentesLista = getAtendentes();
+  const nomeOficial = n => {
+    const at = atendentesLista.find(x => normalizarNome(x.nome) === normalizarNome(n));
+    return at ? at.nome : (String(n || '').trim() || 'Desconhecido');
+  };
+
   if(filtroColab && filtroColab !== 'todos') {
-    acs = acs.filter(a => a.colab === filtroColab);
+    acs = acs.filter(a => normalizarNome(a.colab) === normalizarNome(filtroColab));
   }
 
   if(filtroPerfil && filtroPerfil !== 'todos') {
-    const atendentesLista = getAtendentes();
     acs = acs.filter(a => {
       const at = atendentesLista.find(x => normalizarNome(x.nome) === normalizarNome(a.colab));
       const perfilDele = at ? (at.perfil || 'atendente') : 'atendente';
@@ -5086,31 +5084,33 @@ function calcProdData(filtroPer, filtroColab, filtroPerfil) {
     });
   }
 
-  // Agrupar por colaborador
   const mapa = {};
   acs.forEach(ac => {
-    const c = ac.colab || 'Desconhecido';
-    if(!mapa[c]) mapa[c] = {
-      nome: c, total: 0, renovados: 0, negociando: 0,
-      boletoEnviado: 0, boletoPago: 0, trancamento: 0, evadidos: 0,
+    const k = normalizarNome(ac.colab) || 'desconhecido';
+    if(!mapa[k]) mapa[k] = {
+      nome: nomeOficial(ac.colab), total: 0, renovados: 0, negociando: 0,
+      boletoEnviado: 0, boletoPago: 0, trancamento: 0, evadidos: 0, lote: 0,
       datas: new Set()
     };
-    mapa[c].total++;
+    const m = mapa[k];
+    // Envio em lote: um registro por aluno da lista, não é atendimento individual
+    if(acEhLote(ac)) { m.lote++; return; }
+    m.total++;
     const st = ac.stAl || '';
-    if(st === 'Renovado')       mapa[c].renovados++;
-    else if(st === 'Em negociação') mapa[c].negociando++;
-    else if(st === 'Trancamento')   mapa[c].trancamento++;
-    else if(st === 'Evadido')       mapa[c].evadidos++;
-    // Boleto enviado/pago — detectar pelo tipo de acionamento ou obs
+    if(st === 'Renovado')           m.renovados++;
+    else if(st === 'Em negociação') m.negociando++;
+    else if(st === 'Trancamento')   m.trancamento++;
+    else if(st === 'Evadido')       m.evadidos++;
+    // Boleto: só pelo que a pessoa escreveu na observação (não conta nome de modelo de mensagem)
     const obs = String(ac.obs||'').toLowerCase();
-    const tipo = String(ac.tipo||'').toLowerCase();
-    if(obs.includes('boleto') && obs.includes('envi')) mapa[c].boletoEnviado++;
-    if(obs.includes('boleto') && (obs.includes('pago')||obs.includes('pag'))) mapa[c].boletoPago++;
-    if(ac.data) mapa[c].datas.add(ac.data);
+    if(obs.indexOf('template:') !== 0 && obs.indexOf('boleto') >= 0) {
+      if(/\b(pago|pagou|quitou|quitado|compensado)\b/.test(obs)) m.boletoPago++;
+      else if(/\b(enviei|enviado|envio|mandei|encaminhei|reenviei|gerei|gerado)\b/.test(obs)) m.boletoEnviado++;
+    }
+    if(ac.data) m.datas.add(ac.data);
   });
 
-  // Totais globais
-  const lista = Object.values(mapa).sort((a,b)=>b.renovados - a.renovados);
+  const lista = Object.values(mapa).sort((a,b)=>b.renovados - a.renovados || b.total - a.total);
   const totais = lista.reduce((acc,c)=>({
     total:        acc.total + c.total,
     renovados:    acc.renovados + c.renovados,
@@ -5119,10 +5119,11 @@ function calcProdData(filtroPer, filtroColab, filtroPerfil) {
     boletoPago:   acc.boletoPago + c.boletoPago,
     trancamento:  acc.trancamento + c.trancamento,
     evadidos:     acc.evadidos + c.evadidos,
-  }), {total:0,renovados:0,negociando:0,boletoEnviado:0,boletoPago:0,trancamento:0,evadidos:0});
+    lote:         acc.lote + c.lote,
+  }), {total:0,renovados:0,negociando:0,boletoEnviado:0,boletoPago:0,trancamento:0,evadidos:0,lote:0});
 
   const tx = totais.total ? Math.round(totais.renovados/totais.total*100) : 0;
-  return { lista, totais, tx, acs };
+  return { lista, totais, tx, acs: acs.filter(a => !acEhLote(a)) };
 }
 
 function renderProd() {
@@ -5137,7 +5138,15 @@ function renderProd() {
   const { lista, totais, tx, acs } = calcProdData(filtroPer, filtroColab, filtroPerfil);
 
   // Lista de colaboradores únicos
-  const colabs = [...new Set(ACIONAMENTOS.map(a=>a.colab).filter(Boolean))].sort();
+  const _vistosCol = {};
+  const colabs = [];
+  getAtendentes().map(a=>a.nome).concat(ACIONAMENTOS.map(a=>a.colab)).forEach(n => {
+    const k = normalizarNome(n); if(!k || _vistosCol[k]) return; _vistosCol[k] = 1; colabs.push(n);
+  });
+  colabs.sort((a,b)=>a.localeCompare(b));
+  const _todosCic = !!window._prodTodosCiclos;
+  const _rotPer = {hoje:'hoje', '7d':'últimos 7 dias', '15d':'últimos 15 dias', mes:'este mês', '30d':'últimos 30 dias', todos:'todo o período'}[filtroPer];
+  const _iniPer = filtroPer === 'todos' ? '' : ' (desde ' + inicioPeriodoProd(filtroPer).toLocaleDateString('pt-BR') + ')';
 
   const agora = new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
   const maxRen = lista.length ? lista[0].renovados : 1;
@@ -5145,6 +5154,10 @@ function renderProd() {
   tela.innerHTML = `
 <div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="btn bs bpq" onclick="exportarProdPDF()" title="Exportar PDF">📄 Exportar PDF</button></div>
 <div class="prod-filtros">
+  <select onchange="window._prodTodosCiclos=this.value==='todos';renderProd()" style="min-width:170px" title="Ciclo de renovação">
+    <option value="atual" ${_todosCic?'':'selected'}>Ciclo ${S.periodo}</option>
+    <option value="todos" ${_todosCic?'selected':''}>Todos os ciclos</option>
+  </select>
   <select onchange="window._prodFiltPer=this.value;renderProd()" style="min-width:200px">
     <option value="hoje"  ${filtroPer==='hoje' ?'selected':''}>Hoje</option>
     <option value="7d"    ${filtroPer==='7d'   ?'selected':''}>Últimos 7 dias</option>
@@ -5155,7 +5168,7 @@ function renderProd() {
   </select>
   <select onchange="window._prodFiltColab=this.value;renderProd()" style="min-width:220px">
     <option value="todos">Todos os atendentes</option>
-    ${colabs.map(c=>`<option value="${c}" ${filtroColab===c?'selected':''}>${c}</option>`).join('')}
+    ${colabs.map(c=>`<option value="${escEv(c)}" ${normalizarNome(filtroColab)===normalizarNome(c)?'selected':''}>${escEv(c)}</option>`).join('')}
   </select>
   <select onchange="window._prodFiltPerfil=this.value;renderProd()" style="min-width:170px">
     <option value="todos" ${filtroPerfil==='todos'?'selected':''}>Todas as funções</option>
@@ -5166,7 +5179,10 @@ function renderProd() {
   <button class="btn bp bpq" onclick="renderProd()">🔄 Atualizar</button>
   <button class="btn bs bpq" onclick="exportProd()">⬇ Exportar</button>
 </div>
-<div class="prod-atualizado">Atualizado: ${agora}</div>
+<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;background:var(--azl);border:1px solid var(--azb);border-radius:8px;padding:8px 12px;font-size:12px;margin-bottom:12px">
+  <span>Mostrando: <strong>${_todosCic ? 'todos os ciclos' : 'ciclo ' + S.periodo}</strong> · <strong>${_rotPer}</strong>${_iniPer}. Envios em lote aparecem em coluna própria e não entram em Acionamentos nem na conversão.</span>
+  <span style="color:var(--ct)">Atualizado: ${agora}</span>
+</div>
 
 <div class="prod-cards">
   <div class="prod-card">
@@ -5179,6 +5195,11 @@ function renderProd() {
     <div class="pc-vl">${totais.renovados}</div>
     <div class="pc-sub">conversões</div>
   </div>
+  <div class="prod-card">
+    <div class="pc-lb">Envios em lote</div>
+    <div class="pc-vl" style="color:#7B2FBE">${totais.lote}</div>
+    <div class="pc-sub">mensagens em massa</div>
+  </div>
   <div class="prod-card la2">
     <div class="pc-lb">Em Negociação</div>
     <div class="pc-vl">${totais.negociando}</div>
@@ -5187,12 +5208,12 @@ function renderProd() {
   <div class="prod-card">
     <div class="pc-lb">Boleto Enviado</div>
     <div class="pc-vl">${totais.boletoEnviado}</div>
-    <div class="pc-sub">aguard. pagamento</div>
+    <div class="pc-sub">citado na observação</div>
   </div>
   <div class="prod-card vd2">
     <div class="pc-lb">Boleto Pago</div>
     <div class="pc-vl">${totais.boletoPago}</div>
-    <div class="pc-sub">confirmados</div>
+    <div class="pc-sub">citado na observação</div>
   </div>
   <div class="prod-card">
     <div class="pc-lb">Trancamentos</div>
@@ -5209,7 +5230,7 @@ function renderProd() {
 <div class="tw" style="margin-bottom:18px">
   <div class="th2"><strong>Eficiência por Atendente</strong></div>
   ${lista.length === 0
-    ? '<p style="padding:24px;text-align:center;color:var(--ct)">Nenhum acionamento no período selecionado.</p>'
+    ? '<p style="padding:24px;text-align:center;color:var(--ct)">Nenhum acionamento no período selecionado.' + (_todosCic ? '' : ' Experimente "Todos os ciclos" para ver quem atuou em outro ciclo.') + '</p>'
     : `<div style="overflow-x:auto"><table class="tab-prod" style="width:100%">
     <thead>
       <tr>
@@ -5221,6 +5242,7 @@ function renderProd() {
         <th>Boleto Enviado</th>
         <th>Boleto Pago</th>
         <th>Trancamento</th>
+        <th>Envios em lote</th>
         <th>Conv. %</th>
         <th>Eficiência</th>
       </tr>
@@ -5233,13 +5255,14 @@ function renderProd() {
         const barClass   = conv>=50?'vd':conv>=25?'la':'vm';
         return `<tr>
           <td><div class="rank-medal ${medalClass}">${i+1}</div></td>
-          <td><strong>${c.nome}</strong></td>
+          <td><strong>${escEv(c.nome)}</strong></td>
           <td style="text-align:center">${c.total}</td>
           <td style="text-align:center;font-weight:700;color:var(--vd)">${c.renovados}</td>
           <td style="text-align:center;color:var(--la)">${c.negociando}</td>
           <td style="text-align:center">${c.boletoEnviado}</td>
           <td style="text-align:center;font-weight:600;color:var(--vd)">${c.boletoPago}</td>
           <td style="text-align:center">${c.trancamento}</td>
+          <td style="text-align:center;color:#7B2FBE">${c.lote}</td>
           <td style="text-align:center">
             <span style="font-weight:700;color:${conv>=50?'var(--vd)':conv>=25?'var(--la)':'var(--vm)'}">${conv}%</span>
           </td>
@@ -5409,10 +5432,10 @@ function exportProd() {
   const filtroColab  = window._prodFiltColab  || 'todos';
   const filtroPerfil = window._prodFiltPerfil || 'todos';
   const { lista } = calcProdData(filtroPer, filtroColab, filtroPerfil);
-  const hd = ['#','Atendente','Acionamentos','Renovados','Em Negociação','Boleto Enviado','Boleto Pago','Trancamento','Conv. %'];
+  const hd = ['#','Atendente','Acionamentos','Renovados','Em Negociação','Boleto Enviado','Boleto Pago','Trancamento','Envios em lote','Conv. %'];
   const rows = lista.map((c,i)=>{
     const conv = c.total?Math.round(c.renovados/c.total*100):0;
-    return [i+1,c.nome,c.total,c.renovados,c.negociando,c.boletoEnviado,c.boletoPago,c.trancamento,conv+'%'].map(v=>`"${v}"`);
+    return [i+1,c.nome,c.total,c.renovados,c.negociando,c.boletoEnviado,c.boletoPago,c.trancamento,c.lote,conv+'%'].map(v=>`"${v}"`);
   });
   const csv = [hd.join(','),...rows.map(r=>r.join(','))].join('\n');
   const blob = new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'});
@@ -5501,14 +5524,12 @@ function renderAdmin() {
   <!-- ATENDENTES -->
   <div class="admin-section">
     <h3><i class="fa fa-users"></i> Atendentes Cadastrados (${colabs.length})</h3>
-    <p style="font-size:12px;color:var(--ct);margin-bottom:8px">Renomeie para corrigir grafias duplicadas (ex: "ANGELICA" e "Angélica" viram uma só) ou remova do cadastro ativo.</p>
+    <p style="font-size:12px;color:var(--ct);margin-bottom:8px">Números desde o início, somando todos os ciclos e sem contar envios em lote (por isso são maiores que os da tela Produtividade, que mostra o ciclo e o período escolhidos). Renomeie para corrigir grafias duplicadas (ex: "ANGELICA" e "Angélica" viram uma só) ou remova do cadastro ativo.</p>
     <div style="display:flex;flex-wrap:wrap;gap:6px">
       ${colabs.map(c=>{
-        const acs = ACIONAMENTOS.filter(a=>a.colab===c).length;
-        const ren = ALUNOS.filter(a=>{
-          const ul = ACIONAMENTOS.filter(x=>x.alunoId===a.id&&x.colab===c).slice(-1)[0];
-          return ul && a.status==='Renovado';
-        }).length;
+        const acsC = ACIONAMENTOS.filter(a=>a.colab===c && !acEhLote(a));
+        const acs = acsC.length;
+        const ren = acsC.filter(a=>a.stAl==='Renovado').length;
         return `<div style="display:flex;align-items:center;gap:6px;background:#fff;border:1px solid var(--cbr);border-radius:7px;padding:6px 8px 6px 11px;font-size:12px">
           <span><strong>${c}</strong> · ${acs} acion. · ${ren} ren.</span>
           <button class="btn bs bpq" style="font-size:10px;padding:3px 6px" onclick="renomearColaboradorAdmin('${c.replace(/'/g,"\\'")}')" title="Renomear e mesclar histórico">✏️</button>
