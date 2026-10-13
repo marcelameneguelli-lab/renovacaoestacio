@@ -83,7 +83,19 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:var(--cb);color:var(--tx
 #sb nav{flex:1;padding:10px 0;overflow-y:auto}
 #sb nav a{display:flex;align-items:center;gap:9px;padding:9px 16px;color:rgba(255,255,255,.8);cursor:pointer;font-size:13px;transition:background .15s}
 #sb nav a:hover,#sb nav a.on{background:rgba(255,255,255,.13);color:#fff}
-#sb nav a .ic{font-size:15px;width:18px;text-align:center}
+#sb nav a .ic{font-size:15px;width:18px;text-align:center;flex-shrink:0}
+#sb nav.sb-foot{flex:0 0 auto;overflow:visible;border-top:1px solid rgba(255,255,255,.12);padding:6px 0}
+.sb-sec{font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:rgba(255,255,255,.45);padding:14px 16px 4px;display:flex;align-items:center;justify-content:space-between}
+.sb-sec-tg{cursor:pointer;user-select:none}
+.sb-sec-tg:hover{color:rgba(255,255,255,.8)}
+#sec-gestao.fechado #sec-gestao-itens{display:none}
+#sec-gestao.fechado #sec-gestao-seta{display:inline-block;transform:rotate(-90deg)}
+.sb-badge{margin-left:auto;min-width:20px;text-align:center;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:700;color:#fff}
+.sb-badge.vm{background:#E74C3C}.sb-badge.la{background:#E67E22}.sb-badge.vd{background:#27AE60}
+#nd-alunos{display:none!important}
+.tb-busca{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--cbr);background:var(--cb);color:var(--ct);border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;font-family:inherit}
+.tb-busca:hover{border-color:var(--azm);color:var(--az)}
+.tb-busca kbd{background:#fff;border:1px solid var(--cbr);border-radius:4px;padding:0 5px;font-size:10px;font-family:monospace}
 #sb .ub{padding:10px 14px;border-top:1px solid rgba(255,255,255,.12);font-size:12px;opacity:.75}
 #cnt{flex:1;overflow-y:auto;display:flex;flex-direction:column}
 #tb{background:#fff;border-bottom:1px solid var(--cbr);padding:10px 22px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
@@ -390,20 +402,27 @@ window.addEventListener('unhandledrejection', function(e) {
     <small>Est&#xE1;cio &#xB7; Volta Redonda</small>
   </div>
   <nav>
-    <a class="on" onclick="ir('dash')"><i class="fa fa-chart-bar" style="width:16px"></i> Dashboard<span class="atalho-badge">Alt+1</span></a>
-    <a onclick="ir('alunos')">🎓 Alunos <span class="ndot" id="nd-alunos" style="display:none"></span><span class="atalho-badge">Alt+2</span></a>
-    <a onclick="ir('envios')">📤 Central de Envios</a>
-    <a onclick="ir('followup')">🔔 Follow-Up <span class="ndot" id="nd-fu"></span></a>
-    <a onclick="abrirRecados()">📌 Recados <span class="ndot" id="nd-recados" style="display:none"></span></a>
-    <a onclick="ir('importar')">📥 Importar Base</a>
-    <a onclick="ir('renovados')">✅ Hist&#xF3;rico</a>
-    <a onclick="ir('relatorios')">📊 Relat&#xF3;rios</a>
-    <a onclick="ir('evasao')">🚪 Evas&#xE3;o</a>
-    <a onclick="ir('boasvindas')">🎉 Boas-vindas <span id="nd-bv" style="display:none;background:#1E8449;color:#fff;border-radius:10px;padding:0 7px;font-size:10px;font-weight:700;margin-left:4px"></span></a>
-    <a onclick="window.open(RECUPERA_URL,'recupera')" title="Portal de Negociação (SIA)">💳 Recupera</a>
-    <a onclick="ir('produtividade')">👥 Produtividade</a>
-    <a onclick="ir('config')" id="menu-config"><span class="ic"><i class="fa fa-cog"></i></span> Configura&#xE7;&#xF5;es</a>
-    <a onclick="abrirAdmin()" id="menu-admin" style="display:none">🔐 Admin</a>
+    <a class="on" onclick="ir('dash')"><span class="ic">📊</span> Dashboard</a>
+    <div class="sb-sec">Atendimento</div>
+    <a onclick="ir('alunos')"><span class="ic">🎓</span> Alunos <span class="ndot" id="nd-alunos" style="display:none"></span></a>
+    <a onclick="ir('envios')"><span class="ic">📤</span> Central de Envios</a>
+    <a onclick="ir('followup')" title="Follow-ups de hoje e atrasados"><span class="ic">🔔</span> Follow-Up <span class="sb-badge vm" id="nd-fu" style="display:none"></span></a>
+    <a onclick="abrirRecados()" title="Recados pendentes para você"><span class="ic">📌</span> Recados <span class="sb-badge la" id="nd-recados" style="display:none"></span></a>
+    <a onclick="ir('boasvindas')" title="Renovados aguardando boas-vindas"><span class="ic">🎉</span> Boas-vindas <span class="sb-badge vd" id="nd-bv" style="display:none"></span></a>
+    <div id="sec-gestao">
+      <div class="sb-sec sb-sec-tg" onclick="toggleSecaoGestao()">Gestão <span id="sec-gestao-seta">▾</span></div>
+      <div id="sec-gestao-itens">
+        <a onclick="ir('relatorios')"><span class="ic">📈</span> Relat&#xF3;rios</a>
+        <a onclick="ir('produtividade')"><span class="ic">👥</span> Produtividade</a>
+        <a onclick="ir('evasao')"><span class="ic">🚪</span> Evas&#xE3;o</a>
+        <a onclick="ir('renovados')"><span class="ic">🗂️</span> Hist&#xF3;rico</a>
+        <a onclick="ir('importar')"><span class="ic">📥</span> Importar Base</a>
+      </div>
+    </div>
+  </nav>
+  <nav class="sb-foot">
+    <a onclick="ir('config')" id="menu-config"><span class="ic">⚙️</span> Configura&#xE7;&#xF5;es</a>
+    <a onclick="abrirAdmin()" id="menu-admin" style="display:none"><span class="ic">🔐</span> Admin</a>
   </nav>
   <div id="online-wrap" style="display:none">
     <div class="on-titulo">&bull; Atividade da equipe hoje</div>
@@ -445,6 +464,7 @@ window.addEventListener('unhandledrejection', function(e) {
   <div id="tb">
     <h1 id="ttl">📊 Dashboard Geral</h1>
     <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
+      <button class="tb-busca" onclick="abrirBuscaGlobal()" title="Buscar aluno (Ctrl+K)">🔍 Buscar aluno <kbd>Ctrl+K</kbd></button>
       <select id="ciclo-sel" onchange="trocarCiclo(this.value)" title="Ciclo de renovação em trabalho" style="font-size:12px;font-weight:700;padding:4px 8px;border-radius:6px;border:1px solid var(--azb);color:var(--az);background:var(--azl)"></select>
       <span id="per-badge" class="badge baz" style="padding:4px 10px;font-size:12px">Prazo</span>
       <button class="btn bs bpq" onclick="exportCSV()">v CSV</button>
@@ -1270,6 +1290,7 @@ function ir(t) {
   TELAS.forEach(x=>document.getElementById('tela-'+x).style.display='none');
   document.getElementById('tela-'+t).style.display='block';
   document.querySelectorAll('#sb nav a').forEach(el=>{el.classList.remove('on');if((el.getAttribute('onclick')||'')==="ir('"+t+"')")el.classList.add('on')});
+  try { var _atv = document.querySelector('#sec-gestao-itens a.on'); if(_atv) abrirSecaoGestao(); } catch(e) {}
   document.getElementById('ttl').textContent = TITULOS[t];
   window._telaAtiva = t;
   const fn = {dash:rDash,alunos:rAlunos,envios:rEnvios,followup:rFollowup,importar:rImportar,renovados:rRenovados,relatorios:rRelatorios,evasao:rEvasao,boasvindas:rBoasVindas,produtividade:rProdutividade,config:function(){ rConfig(); anexarConfigObjecoes(); }}[t];
@@ -1438,7 +1459,7 @@ function checkAlertas() {
   try { atualizarBadgeBv(); } catch(e) {}
   // Badge no menu sempre atualiza independente da tela
   const ndFu = document.getElementById('nd-fu');
-  if(ndFu) ndFu.style.display = tot > 0 ? 'inline-block' : 'none';
+  if(ndFu) { ndFu.textContent = tot; ndFu.style.display = tot > 0 ? 'inline-block' : 'none'; }
 
   // Badge de acionamentos de hoje no topbar
   const hojeStr = new Date().toLocaleDateString('pt-BR');
@@ -1708,7 +1729,7 @@ function atualizarBadgeRecados() {
     return !r.concluido && (r.paraQuem === 'Todos' || normalizarNome(r.paraQuem) === normalizarNome(S.colab));
   });
   var badge = document.getElementById('nd-recados');
-  if(badge) badge.style.display = meus.length > 0 ? 'inline-block' : 'none';
+  if(badge) { badge.textContent = meus.length; badge.style.display = meus.length > 0 ? 'inline-block' : 'none'; }
 }
 
 function abrirRecados() {
@@ -4718,6 +4739,28 @@ window._loginIsAdmin = false;
 
 // fazerLogin removida (sem sistema de login)
 
+// ── Menu: seção Gestão (recolhível e escondida para atendente/apoio) ──
+function toggleSecaoGestao() {
+  var sec = document.getElementById('sec-gestao'); if(!sec) return;
+  var fechado = sec.classList.toggle('fechado');
+  try { localStorage.setItem('menuGestaoFechado', fechado ? '1' : '0'); } catch(e) {}
+}
+function abrirSecaoGestao() {
+  var sec = document.getElementById('sec-gestao');
+  if(sec && sec.classList.contains('fechado')) { sec.classList.remove('fechado'); try { localStorage.setItem('menuGestaoFechado','0'); } catch(e) {} }
+}
+// Gestão aparece para coordenador, para quem entrou como admin e para quem
+// ainda não está no cadastro de atendentes. Some só para atendente e apoio.
+function aplicarMenuPerfil() {
+  var sec = document.getElementById('sec-gestao'); if(!sec) return;
+  var adminOk = S.adminPass && sessionStorage.getItem('adminAuth') === S.adminPass;
+  var at = null;
+  try { at = getAtendentes().find(function(a){ return normalizarNome(a.nome) === normalizarNome(S.colab); }); } catch(e) {}
+  var esconder = !adminOk && at && (at.perfil === 'atendente' || at.perfil === 'apoio' || !at.perfil);
+  sec.style.display = esconder ? 'none' : '';
+  if(localStorage.getItem('menuGestaoFechado') === '1') sec.classList.add('fechado');
+}
+
 function salvarIdentificacao() {
   const nome   = (document.getElementById('cfg-colab')?.value || '').trim();
   const equipe = (document.getElementById('cfg-equipe')?.value || '').trim();
@@ -4740,6 +4783,7 @@ function salvarIdentificacao() {
   const ac = document.getElementById('colab-ac');
   if(ac && !ac.dataset.manual) ac.value = nome;
 
+  try { aplicarMenuPerfil(); } catch(e) {}
   mostrarToast('&#10003; Nome salvo: ' + nome + ' · Seus acionamentos serão registrados com este nome.');
   // Iniciar realtime se GAS configurado e ainda não rodando
   if(localStorage.getItem('gasUrl') && !window._rtInterval) {
@@ -4835,6 +4879,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   try { atualizarContadorHoje(); } catch(e){}
   try { atualizarOnlineAgora(); } catch(e){}
   try { atualizarBadgeRecados(); } catch(e){}
+  try { aplicarMenuPerfil(); } catch(e){}
 
   // Atalho ESC
   document.addEventListener('keydown',e=>{if(e.key==='Escape'){document.querySelectorAll('.mo.on').forEach(m=>m.classList.remove('on'));var bg=document.getElementById('busca-global-wrap');if(bg)bg.classList.remove('on');}});
@@ -5288,6 +5333,7 @@ function tentarLoginAdmin() {
   const pass = document.getElementById('admin-login-pass')?.value;
   if(pass === S.adminPass) {
     sessionStorage.setItem('adminAuth', pass);
+    try { aplicarMenuPerfil(); } catch(e) {}
     fcModal('m-admin-login');
     renderAdmin();
     abModal('m-admin');
@@ -5942,8 +5988,6 @@ function iniciarRealtime() {
         if(d.followups) {
           window._fuCache = d.followups;
           var tot = (d.followups.hoje||[]).concat(d.followups.atrasados||[]).filter(function(x){ return !getFuConcluidos().has(String(x.id)); }).length;
-          var nd = document.getElementById('nd-fu');
-          if(nd) nd.style.display = tot > 0 ? 'inline-block' : 'none';
           // Sincronizar fuStatus dos follow-ups recebidos do servidor
           // O servidor sabe quais foram concluídos (OK) por qualquer atendente
           var fuTodos = (d.followups.hoje||[]).concat(d.followups.atrasados||[]).concat(d.followups.proximos||[]);
@@ -6313,6 +6357,7 @@ function carregarAtendentesGAS() {
     var local  = localStorage.getItem('atendentes') || '[]';
     if(remoto !== local) {
       localStorage.setItem('atendentes', remoto);
+      try { aplicarMenuPerfil(); } catch(e) {}
       // Recalcular numAtend a partir da lista atualizada
       var contamMeta = d.atendentes.filter(function(a){ return a.ativo && a.contaMeta!==false; }).length;
       if(contamMeta > 0) {
@@ -7273,6 +7318,7 @@ function getAtendentes() {
 function salvarAtendentes(lista) {
   localStorage.setItem('atendentes', JSON.stringify(lista));
   pushAtendentesGAS(lista);
+  try { aplicarMenuPerfil(); } catch(e) {}
   // Sincronizar numAtend apenas com quem CONTA para meta (não coordenadores/apoio por padrão)
   const contamMeta = lista.filter(a=>a.ativo && a.contaMeta!==false).length;
   if(contamMeta > 0) {
