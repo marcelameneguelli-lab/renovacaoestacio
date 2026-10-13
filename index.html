@@ -581,7 +581,8 @@ window.addEventListener('unhandledrejection', function(e) {
 <script>
 
 
-const VERSAO_SISTEMA = '2.0.0 · ciclos · 27/09/2026';
+const VERSAO_SISTEMA = '2.1.0 · menu e acessos · 12/10/2026';
+const EMAIL_RELATORIO_DIARIO = 'marques.marcela@estacio.br';
 const ADMIN_EMAIL_FIXO = 'marcela.meneguelli@gmail.com';
 const ADMIN_PASS_FIXO  = 'estacio2026';
 const ADMIN_NOME_FIXO  = 'Marcela Meneguelli';
@@ -3991,7 +3992,7 @@ function rConfig() {
 <!-- ═══ E-MAIL ADMIN ════════════════════════════════════════════ -->
 ${sessionStorage.getItem('adminAuth') === S.adminPass && S.adminPass ? `
 <div class="tw"><div class="th2"><strong>E-mail Administrador e Relatório Diário</strong></div><div style="padding:18px">
-  <p style="font-size:13px;color:var(--ct);margin-bottom:12px">Configure o e-mail que receberá o relatório diário de produtividade e terá acesso ao painel administrativo.</p>
+  <p style="font-size:13px;color:var(--ct);margin-bottom:12px">O relatório diário de produtividade é enviado automaticamente pelo servidor para <strong>${EMAIL_RELATORIO_DIARIO}</strong>, às 20h de segunda a sexta e às 13h no sábado. O e-mail abaixo é o do acesso administrativo.</p>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
     <div class="fg"><label>E-mail do administrador</label>
       <input type="email" id="cfg-admin-email" value="${localStorage.getItem('adminEmail')||ADMIN_EMAIL_FIXO}" placeholder="coordenacao@estacio.br" style="width:100%">
@@ -4786,6 +4787,7 @@ function salvarIdentificacao() {
   try { aplicarMenuPerfil(); } catch(e) {}
   mostrarToast('&#10003; Nome salvo: ' + nome + ' · Seus acionamentos serão registrados com este nome.');
   // Iniciar realtime se GAS configurado e ainda não rodando
+  try { registrarAcessoGAS('entrada'); } catch(e) {}
   if(localStorage.getItem('gasUrl') && !window._rtInterval) {
     carregarHistoricoGAS();
     setTimeout(iniciarRealtime, 2000);
@@ -4854,6 +4856,7 @@ document.addEventListener('DOMContentLoaded',()=>{
     setTimeout(function() {
       carregarHistoricoGAS();
       setTimeout(iniciarRealtime, 3000);
+      try { iniciarRegistroAcesso(); } catch(e) {}
       // Migração automática silenciosa após 10s
       setTimeout(function() {
         try { migrarAutomatico(); } catch(e) { console.warn('[AUTO-MIG]', e); }
@@ -5450,9 +5453,9 @@ function renderAdmin() {
   <div class="admin-section">
     <h3>✉️ Relatório Manual</h3>
     <p style="font-size:13px;color:var(--ct);margin-bottom:10px">
-      Destinatário: <strong>${S.adminEmail||'Não configurado'}</strong>
+      O relatório de produtividade do dia (acessos, tempo ativo, acionamentos, renovações, envios e follow-ups em atraso) sai sozinho às 20h de segunda a sexta e às 13h no sábado para <strong>${EMAIL_RELATORIO_DIARIO}</strong>.
     </p>
-    <button class="btn bp" onclick="testarRelatorio()">✉️ Enviar relatório agora</button>
+    <button class="btn bp" onclick="testarRelatorio()">✉️ Enviar o relatório de hoje agora</button>
     <div id="rel-status" style="font-size:12px;margin-top:8px;min-height:16px"></div>
   </div>
 </div>`;
@@ -5603,6 +5606,22 @@ function adminResetTotal() {
 }
 
 function testarRelatorio() {
+  if(localStorage.getItem('gasUrl')) {
+    var relEl0 = document.getElementById('rel-status');
+    if(relEl0) relEl0.innerHTML = '<span style="color:var(--azm)">⏳ Gerando e enviando...</span>';
+    gasPost('enviar_relatorio_diario', {}).then(function(d) {
+      var ok = d && d.ok && d.enviado;
+      var msg = ok ? '&#10003; Relatório enviado para ' + (d.destino || EMAIL_RELATORIO_DIARIO) + '.'
+        : (d && d.erro && d.erro.indexOf('desconhecida') >= 0)
+          ? '&#9888;️ O servidor ainda está na versão antiga. Publique o GAS v6.2.'
+          : '&#9888;️ Não foi possível enviar: ' + ((d && (d.erro || d.motivo)) || 'sem resposta');
+      if(relEl0) relEl0.innerHTML = msg;
+      mostrarToast(msg);
+    }).catch(function(err) {
+      if(relEl0) relEl0.innerHTML = '&#10007; Falha ao contactar o servidor: ' + err.message;
+    });
+    return;
+  }
   if(!S.adminEmail) { mostrarToast('&#9888;️ Configure o e-mail admin em Configurações.'); return; }
   const ritmo   = calcRitmo();
   const { lista } = calcProdData('mes','todos');
@@ -8107,6 +8126,32 @@ function exportarProdPDF() {
   win.document.close();
 }
 
+
+// ═══════════════════════════════════════════════════════
+//  REGISTRO DE ACESSOS (alimenta o relatório diário no servidor)
+//  "entrada" ao abrir o sistema; "ativo" a cada 5 min enquanto a
+//  pessoa está mexendo (aba visível e algum clique/tecla/rolagem).
+// ═══════════════════════════════════════════════════════
+var ACESSO_INTERVALO_MS = 5 * 60 * 1000;
+window._ultimaAtividade = Date.now();
+function registrarAcessoGAS(evento) {
+  if(!localStorage.getItem('gasUrl')) return;
+  gasPost('registrar_acesso', { colab: S.colab || '', evento: evento, ciclo: S.periodo || '', tela: window._telaAtiva || 'dash' })
+    .catch(function(){});
+}
+function iniciarRegistroAcesso() {
+  if(window._acessoIniciado) return;
+  window._acessoIniciado = true;
+  ['click','keydown','scroll','mousemove','touchstart'].forEach(function(ev) {
+    document.addEventListener(ev, function(){ window._ultimaAtividade = Date.now(); }, { passive: true, capture: true });
+  });
+  registrarAcessoGAS('entrada');
+  setInterval(function() {
+    var visivel = document.visibilityState === 'visible';
+    var mexeu = Date.now() - window._ultimaAtividade < ACESSO_INTERVALO_MS;
+    if(visivel && mexeu) registrarAcessoGAS('ativo');
+  }, ACESSO_INTERVALO_MS);
+}
 
 // ═══ PWA — registrar o Service Worker (permite instalar como app) ═══
 if('serviceWorker' in navigator) {
