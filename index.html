@@ -1016,6 +1016,7 @@ function trocarCiclo(c, silencioso) {
   if(cfg.metaFinal) { S.metaFinal = parseInt(cfg.metaFinal) || S.metaFinal; localStorage.setItem('metaFinal', String(S.metaFinal)); }
   try { S.metaDia = calcMetaDiaAuto(); localStorage.setItem('metaDia', String(S.metaDia)); } catch(e) {}
   if(S.fil) Object.keys(S.fil).forEach(function(k){ S.fil[k] = ''; });
+  try { sincronizarStatusAlunos(); } catch(e) {}
   var badge = document.getElementById('per-badge');
   if(badge) badge.textContent = 'Prazo: ' + (cfg.prazo || S.prazo) + (cfg.prazo ? '' : ' (defina)');
   renderSeletorCiclo();
@@ -1065,28 +1066,46 @@ function idxCiclos() {
   _idxCiclosSig = sig;
   return _idxCiclos;
 }
+// Início do ciclo (DD/MM/AAAA) definido pela administração em Configurações.
+// Acionamentos com data anterior ao início NÃO contam para o ciclo:
+// é assim que um aluno de 2026.2 que voltou na base de 2026.4 começa "do zero".
+function inicioCicloDate(c) { return prazoParaDate((getCicloCfg()[c] || {}).inicio || ''); }
+function sigInicios() {
+  var cfg = getCicloCfg();
+  return Object.keys(cfg).map(function(c){ return c + '=' + ((cfg[c] || {}).inicio || ''); }).join(';');
+}
+function acAntesDoInicio(ac, c) {
+  var ini = inicioCicloDate(c); if(!ini) return false;
+  var d = dataDoAc(ac); return !!(d && d < ini);
+}
 function cicloDoAc(ac) {
   if(!ac) return '';
   var cands = idxCiclos()[String(ac.alunoId)] || [];
+  var r = '';
   if(ac.ciclo) {
     var cg = normCiclo(ac.ciclo);
-    // Ciclo gravado errado (aluno não está nessa base, mas está em outra): corrige
-    if(cands.length && cands.indexOf(cg) < 0) return cands.length === 1 ? cands[0] : cands.slice().sort().pop();
-    return cg;
+    // Ciclo gravado errado: só corrige quando a base daquele ciclo está carregada
+    // e o aluno não está nela. Base não carregada (ciclo antigo) = confia no gravado.
+    var baseCg = BASES[cg];
+    if(baseCg && baseCg.length && cands.length && cands.indexOf(cg) < 0) {
+      var validos = cands.filter(function(c){ return !acAntesDoInicio(ac, c); });
+      r = validos.length ? validos.slice().sort().pop() : '';
+    } else r = cg;
+  } else {
+    var pool = (cands.length ? cands : cicloLista()).filter(function(c){ return !acAntesDoInicio(ac, c); });
+    if(pool.length === 1) r = pool[0];
+    else if(pool.length) {
+      var dAc = dataDoAc(ac), cfg = getCicloCfg(), melhor = null, melhorD = null;
+      if(dAc) pool.forEach(function(c) {
+        var dp = prazoParaDate((cfg[c] || {}).prazo || (c === S.periodo ? S.prazo : ''));
+        if(dp && dp >= dAc && (!melhorD || dp < melhorD)) { melhor = c; melhorD = dp; }
+      });
+      r = melhor || pool.slice().sort()[0];
+    }
   }
-  if(cands.length === 1) return cands[0];
-  var pool = cands.length ? cands : cicloLista();
-  var dAc = prazoParaDate(ac.data);
-  var cfg = getCicloCfg();
-  if(dAc) {
-    var melhor = null, melhorD = null;
-    pool.forEach(function(c) {
-      var dp = prazoParaDate((cfg[c] || {}).prazo || (c === S.periodo ? S.prazo : ''));
-      if(dp && dp >= dAc && (!melhorD || dp < melhorD)) { melhor = c; melhorD = dp; }
-    });
-    if(melhor) return melhor;
-  }
-  return pool.slice().sort().pop() || S.periodo;
+  // Data anterior ao início do ciclo: é histórico de outro semestre
+  if(r && acAntesDoInicio(ac, r)) return '';
+  return r;
 }
 // Follow-ups pendentes: MESMA regra para o aviso vermelho, o resumo do
 // Dashboard, o contador do menu e o kanban (ciclo selecionado ou todos).
@@ -1097,8 +1116,8 @@ function fuPendentes() {
 var _acsCache = { k: '', v: [] };
 function acsCiclo(c) {
   c = c || S.periodo;
-  var k = c + '|' + ACIONAMENTOS.length + '|' + _idxCiclosSig + '|' + (ACIONAMENTOS.length ? ACIONAMENTOS[ACIONAMENTOS.length-1].id : '');
   idxCiclos();
+  var k = c + '|' + ACIONAMENTOS.length + '|' + _idxCiclosSig + '|' + sigInicios() + '|' + (ACIONAMENTOS.length ? ACIONAMENTOS[ACIONAMENTOS.length-1].id : '');
   if(_acsCache.k === k) return _acsCache.v;
   var v = ACIONAMENTOS.filter(function(ac){ return cicloDoAc(ac) === c; });
   _acsCache = { k: k, v: v };
@@ -2477,7 +2496,9 @@ function abrirAluno(id) {
   alunoSel = ALUNOS.find(a=>a.id===id);
   if(!alunoSel) return;
   const a   = alunoSel;
-  const acs = ACIONAMENTOS.filter(x=>x.alunoId===id);
+  const _acsTodos = ACIONAMENTOS.filter(x=>x.alunoId===id);
+  const acs = _acsTodos.filter(x=>cicloDoAc(x)===S.periodo);
+  const acsOutros = _acsTodos.filter(x=>cicloDoAc(x)!==S.periodo);
   const envs= ENVIOS.filter(x=>x.alunoId===id);
 
   document.getElementById('m-aluno-titulo').textContent = a.nome;
@@ -2523,7 +2544,7 @@ function abrirAluno(id) {
   <div class="tab"     onclick="tab(this,'ta-camp')">Campanha</div>
   <div class="tab"     onclick="tab(this,'ta-ac')">Acionamento (${acs.length})</div>
   <div class="tab"     onclick="tab(this,'ta-env')">Envios (${envs.length})</div>
-  <div class="tab"     onclick="tab(this,'ta-hist')">Historico (${acs.length})</div>
+  <div class="tab"     onclick="tab(this,'ta-hist')">Historico (${_acsTodos.length})</div>
   <div class="tab"     onclick="tab(this,'ta-txt')">Mensagens</div>
 </div>
 
@@ -2723,6 +2744,15 @@ function abrirAluno(id) {
         <span class="badge ${ac.stAl==='Renovado'?'bvd':ac.stAl==='Em negociação'?'bla':'bcz'}" style="font-size:10px">${ac.stAl}</span>
       </div>`).join('')}
   </div>`:''}
+  ${acsOutros.length?`<details style="border-top:1px solid var(--cbr);padding-top:10px;margin-top:8px">
+    <summary style="font-size:12px;color:var(--ct);cursor:pointer">🗂️ ${acsOutros.length} acionamento(s) de outro semestre · não contam para o ciclo ${S.periodo}</summary>
+    ${acsOutros.slice().reverse().slice(0,10).map(ac=>`
+      <div style="display:flex;gap:8px;align-items:center;font-size:12px;padding:6px 0;border-bottom:1px dashed var(--cbr);opacity:.75">
+        <span class="badge bcz" style="font-size:10px">${escEv(cicloDoAc(ac)||'anterior')}</span>
+        <span style="flex:1">${escEv(ac.data)} · ${escEv(ac.colab)} · ${escEv(ac.tipo)}${ac.obs?' · '+escEv(ac.obs):''}</span>
+        ${ac.stAl?`<span class="badge bcz" style="font-size:10px">${escEv(ac.stAl)}</span>`:''}
+      </div>`).join('')}
+  </details>`:''}
 </div>
 
 <!-- ═══════ TAB ENVIOS ═══════════════════════════════════════════ -->
@@ -2745,7 +2775,7 @@ function abrirAluno(id) {
 
 <!-- ═══════ TAB HISTÓRICO ═══════════════════════════════════════ -->
 <div class="tc" id="ta-hist">
-  <div style="font-size:12px;color:var(--ct);padding:4px 0 10px">Todos os acionamentos registrados por qualquer atendente para este aluno, em ordem cronológica.</div>
+  <div style="font-size:12px;color:var(--ct);padding:4px 0 10px">Todos os acionamentos registrados por qualquer atendente para este aluno, de todos os semestres. Só os do ciclo ${S.periodo} definem o status atual.</div>
   <div id="ta-hist-content">${renderHistoricoAluno(a.id)}</div>
 </div>
 
@@ -3326,15 +3356,9 @@ function processCSV(file) {
         const aluno = csvParaAluno(row);
         // Restaurar status dos acionamentos locais (fonte mais confiável)
         // Hierarquia: Renovado > Trancamento > Em negociação > Evadido > Pendente
-        var _hier = {'Renovado':4,'Trancamento':3,'Em negociação':2,'Evadido':1,'Pendente':0};
-        var _acsAluno = ACIONAMENTOS.filter(function(ac){ return String(ac.alunoId)===String(aluno.id) && ac.stAl; });
-        if(_acsAluno.length > 0) {
-          // Pegar o status mais alto da hierarquia (não o mais recente)
-          var _melhorStatus = _acsAluno.reduce(function(melhor, ac) {
-            return (_hier[ac.stAl]||0) > (_hier[melhor]||0) ? ac.stAl : melhor;
-          }, 'Pendente');
-          if(_melhorStatus !== 'Pendente') aluno.status = _melhorStatus;
-        }
+        // O status vindo de acionamentos é aplicado depois, só com os acionamentos
+        // DESTE ciclo (sincronizarStatusAlunos). Assim um "Renovado" de 2026.2 não
+        // passa para o mesmo aluno na base de 2026.4.
         // Restaurar CPF e estágio do cache local
         const statusSalvos = JSON.parse(localStorage.getItem('alunos_status')||'[]');
         const salvo = statusSalvos.find(s=>s.id===aluno.id);
@@ -3749,7 +3773,7 @@ function rRenovados() {
 <div class="tabs" id="tab-ren">${tabs.map((t,i)=>`<div class="tab ${i===0?'on':''}" onclick="tabG(this,'tg-${i}')">${t==='Renovado'?'&#10003;':t==='Em negociação'?'🤝':'&#x21A9;'} ${t} (${grupos[t].length})</div>`).join('')}</div>
 ${tabs.map((t,i)=>`<div class="tc ${i===0?'on':''}" id="tg-${i}">
 ${grupos[t].length===0?'<p style="color:var(--ct);padding:16px">Nenhum registro.</p>':`<div class="tw"><div style="overflow-x:auto"><table><thead><tr><th>Nome</th><th>Matrícula</th><th>Curso</th><th>Dívida</th><th>Último Acion.</th><th>Ação</th></tr></thead><tbody>
-${grupos[t].map(a=>{const acsAluno=ACIONAMENTOS.filter(x=>x.alunoId===a.id).sort((x,y)=>(y._ts||0)-(x._ts||0));const ul=acsAluno[0];return`<tr><td><strong>${a.nome}</strong></td><td><code>${a.matricula}</code></td><td style="font-size:12px">${a.curso}</td><td>R$ ${fmtVal(a.divTotal)}</td><td style="font-size:12px">${ul?ul.colab+' · '+ul.data:'—'}</td><td><button class="btn bp bpq" onclick="abrirAluno('${a.id}')">Ver</button></td></tr>`;}).join('')}
+${grupos[t].map(a=>{const acsAluno=acsCiclo().filter(x=>x.alunoId===a.id).sort((x,y)=>(y._ts||0)-(x._ts||0));const ul=acsAluno[0];return`<tr><td><strong>${a.nome}</strong></td><td><code>${a.matricula}</code></td><td style="font-size:12px">${a.curso}</td><td>R$ ${fmtVal(a.divTotal)}</td><td style="font-size:12px">${ul?ul.colab+' · '+ul.data:'—'}</td><td><button class="btn bp bpq" onclick="abrirAluno('${a.id}')">Ver</button></td></tr>`;}).join('')}
 </tbody></table></div></div>`}
 </div>`).join('')}`;
 }
@@ -3995,6 +4019,17 @@ function rConfig() {
     </div>
     <div class="fg"><label>Prazo final de renovação</label>
       <input type="date" id="cfg-prazo-date" value="${prazoParaInput(S.prazo)}" style="width:100%">
+    </div>
+    <div class="fg" style="grid-column:1/-1;background:var(--lab);border:1px solid #F5CBA7;border-radius:8px;padding:10px 12px">
+      <label>Início do ciclo ${S.periodo} <span style="font-weight:400;color:var(--ct)">(acionamentos antes desta data não contam para este ciclo)</span></label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input type="date" id="cfg-inicio-date" value="${prazoParaInput((getCicloCfg()[S.periodo]||{}).inicio||'')}" style="max-width:190px">
+        <button class="btn bs bpq" onclick="salvarInicioCiclo()">Salvar início</button>
+        <button class="btn bs bpq" onclick="reiniciarCicloHoje()">Começar do zero a partir de hoje</button>
+        ${(getCicloCfg()[S.periodo]||{}).inicio?'<button class="btn bs bpq" onclick="limparInicioCiclo()">Remover data</button>':''}
+      </div>
+      <div style="font-size:11px;color:var(--ct);margin-top:6px">Use quando alunos de um semestre anterior voltam numa base nova (ex.: 2026.2 → 2026.4). O histórico antigo continua no painel do aluno, mas não define mais o status, os follow-ups nem a produtividade deste ciclo. Nada é apagado.</div>
+      <div id="cfg-inicio-prev" style="font-size:12px;margin-top:6px"></div>
     </div>
     <div class="fg"><label>Meta de fechamento (total)</label>
       <input type="number" id="cfg-meta-final" value="${S.metaFinal}" min="1" style="width:100%"
@@ -4276,6 +4311,40 @@ function inputParaPrazo(str) {
   const p = str.split('-');
   if(p.length===3) return `${p[2]}/${p[1]}/${p[0]}`;
   return str;
+}
+
+// ── Início do ciclo: reinício dos acionamentos sem apagar histórico ──
+function previaInicioCiclo(dataStr) {
+  var ini = prazoParaDate(dataStr); if(!ini) return null;
+  var ids = new Set(ALUNOS.map(function(a){ return String(a.id); }));
+  var antes = ACIONAMENTOS.filter(function(ac){
+    if(!ids.has(String(ac.alunoId))) return false;
+    var d = dataDoAc(ac); return d && d < ini;
+  });
+  var alunos = new Set(antes.map(function(ac){ return String(ac.alunoId); }));
+  return { acs: antes.length, alunos: alunos.size };
+}
+function aplicarInicioCiclo(dataStr) {
+  var pv = previaInicioCiclo(dataStr);
+  if(pv && !confirm('Ciclo ' + S.periodo + ' começa em ' + dataStr + '.\n\n' + pv.acs + ' acionamento(s) anteriores de ' + pv.alunos + ' aluno(s) desta base deixam de contar para o status, follow-ups e produtividade deste ciclo.\n\nO histórico não é apagado e a mudança vale para toda a equipe. Continuar?')) return;
+  atualizarCicloCfg(S.periodo, { inicio: dataStr });
+  _acsCache = { k: '', v: [] };
+  try { sincronizarStatusAlunos(); salvarDados(); } catch(e) {}
+  mostrarToast('&#10003; Ciclo ' + S.periodo + ' contando a partir de ' + dataStr + '.');
+  try { rConfig(); anexarConfigObjecoes(); } catch(e) {}
+}
+function salvarInicioCiclo() {
+  var v = document.getElementById('cfg-inicio-date').value;
+  if(!v) { mostrarToast('Escolha a data de início.'); return; }
+  aplicarInicioCiclo(inputParaPrazo(v));
+}
+function reiniciarCicloHoje() { aplicarInicioCiclo(new Date().toLocaleDateString('pt-BR')); }
+function limparInicioCiclo() {
+  if(!confirm('Remover a data de início do ciclo ' + S.periodo + '? Os acionamentos antigos voltam a contar.')) return;
+  atualizarCicloCfg(S.periodo, { inicio: '' });
+  _acsCache = { k: '', v: [] };
+  try { sincronizarStatusAlunos(); salvarDados(); } catch(e) {}
+  try { rConfig(); anexarConfigObjecoes(); } catch(e) {}
 }
 
 function salvarConfigPeriodo() {
@@ -4682,7 +4751,7 @@ function exportCSV() {
     'Data Últ.Acion.','Colaborador Últ.Acion.','Tipo Últ.Acion.','Obs Últ.Acion.'
   ];
   const rows = lista.map(a => {
-    const ul = ACIONAMENTOS.filter(x=>x.alunoId===a.id).slice(-1)[0];
+    const ul = acsCiclo().filter(x=>x.alunoId===a.id).slice(-1)[0];
     return [
       a.nome, a.matricula, a.email, a.celularOriginal,
       a.curso, a.modalidade, a.periodo, a.faltaCursar, a.safra,
@@ -5637,10 +5706,7 @@ function forcarSincronizacaoTotal() {
           _ts:      ac._ts || 0,
           ciclo:    ac.ciclo || '',
         });
-        if(ac.stAl && ac.stAl !== 'Pendente') {
-          var al = ALUNOS.find(function(a){ return a.id === String(ac.alunoId); });
-          if(al) al.status = ac.stAl;
-        }
+        // (o status é recalculado por ciclo em sincronizarStatusAlunos logo abaixo)
       } catch(e) { falhas++; console.error('[FORCE-SYNC] item ignorado:', e.message); }
     });
     try { sincronizarStatusAlunos(); } catch(e) {}
@@ -5968,7 +6034,7 @@ function carregarAcionamentosGAS() {
               hora:     ac.hora      || '',
               _ts:      ac._ts       || 0, ciclo: ac.ciclo || '',
             });
-            if(ac.stAl && ac.stAl !== 'Pendente') {
+            if(ac.stAl && ac.stAl !== 'Pendente' && cicloDoAc(ac) === S.periodo) {
               var al = ALUNOS.find(function(a){ return a.id===String(ac.alunoId); });
               if(al) {
                 al.status = ac.stAl;
@@ -6090,7 +6156,7 @@ function iniciarRealtime() {
                   _ts:      ac._ts       || 0, ciclo: ac.ciclo || '',
                 });
                 // Atualizar status do aluno correspondente
-                if(ac.stAl && ac.stAl !== 'Pendente') {
+                if(ac.stAl && ac.stAl !== 'Pendente' && cicloDoAc(ac) === S.periodo) {
                   var al = ALUNOS.find(function(a){ return a.id === String(ac.alunoId); });
                   if(al) {
                     al.status = ac.stAl;
