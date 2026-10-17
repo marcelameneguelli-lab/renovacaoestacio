@@ -986,6 +986,9 @@ function aplicarBasesServidor(lista) {
     (novo[c] = novo[c] || []).push(a);
   });
   Object.keys(novo).forEach(function(c){
+    // Importação deste ciclo ainda em andamento: a base local é a mais nova
+    var imp = (window._ciclosImportando || {})[c];
+    if(imp && Date.now() - imp < 10 * 60 * 1000) return;
     var local = BASES[c] ? BASES[c].length : 0;
     if(local > 20 && novo[c].length < local * 0.5) return; // não encolhe base local por dado incompleto
     definirBaseCiclo(c, novo[c]);
@@ -1684,8 +1687,9 @@ function carregarConfigGeralGAS() {
     try {
       var cicloNovo = Object.keys(cfg).filter(function(k){ return /^ultima_atualizacao_\d{4}\.\d$/.test(k); })
         .map(function(k){ return k.substring(19); })
-        .filter(function(c){ return String(cfg['ultima_atualizacao_' + c]) !== (localStorage.getItem('base_versao_' + c) || ''); });
-      if(cicloNovo.length && !window._recarregandoBase) {
+        .filter(function(c){ return String(cfg['ultima_atualizacao_' + c]) !== (localStorage.getItem('base_versao_' + c) || ''); })
+        .filter(function(c){ var imp = (window._ciclosImportando || {})[c]; return !(imp && Date.now() - imp < 10 * 60 * 1000); });
+      if(cicloNovo.length && !window._recarregandoBase && !window._importAtivo) {
         window._recarregandoBase = true;
         gasGet('carregar_alunos', {}, 60000).then(function(d2) {
           if(d2 && d2.ok && d2.alunos && d2.alunos.length) {
@@ -3081,25 +3085,26 @@ function rImportar() {
   <div class="tw">
     <div class="th2">
       <strong>1️⃣ Base de Alunos — CSV diário</strong>
-      ${ALUNOS.length ? `<span class="badge bvd" id="imp-badge">${ALUNOS.length} alunos · ciclo ${S.periodo} · ${ultImp}</span>` : '<span class="badge bvm">Não importada</span>'}
+      ${ALUNOS.length ? `<span class="badge bvd" id="imp-badge">${ALUNOS.length} alunos · ciclo ${S.periodo}${localStorage.getItem('ultImp_'+S.periodo)?' · importada '+localStorage.getItem('ultImp_'+S.periodo):''}</span>` : '<span class="badge bvm">Não importada</span>'}
     </div>
     <div style="padding:18px">
       <p style="font-size:13px;color:var(--ct);margin-bottom:12px">
-        Arquivo: <strong>BASE_RENOVAVEL_PAR_VOLTA REDONDA.csv</strong><br>
-        <span style="font-size:12px">Importe diariamente. O histórico de acionamentos é preservado automaticamente.</span>
+        Arquivo do ciclo ${S.periodo}: <strong>${tipoCiclo(S.periodo)==='ÍMPAR'?'BASE_RENOVAVEL_IMPAR_VOLTA REDONDA.csv':'BASE_RENOVAVEL_PAR_VOLTA REDONDA.csv'}</strong>${localStorage.getItem('impArq_'+S.periodo)?' · último importado: '+escEv(localStorage.getItem('impArq_'+S.periodo)):''}<br>
+        <span style="font-size:12px">Pode soltar os dois arquivos (ÍMPAR e PAR) juntos: eles entram um de cada vez e você confirma o ciclo de cada um antes de gravar. O histórico de acionamentos é preservado.</span>
       </p>
       <div class="fg" style="max-width:280px;margin-bottom:12px">
-        <label>Ciclo da base (só se o CSV não tiver a coluna PERIODO)</label>
+        <label>Forçar ciclo (opcional)</label>
         <input type="text" id="import-periodo" value="" placeholder="Ex: 2026.3" style="width:100%">
-        <small style="color:var(--ct);font-size:11px">O ciclo é lido do próprio arquivo (coluna PERIODO: 26.3 = ciclo 2026.3 ÍMPAR, 26.4 = 2026.4 PAR). Importar um ciclo não mexe nos outros.</small>
+        <small style="color:var(--ct);font-size:11px">Normalmente fica vazio: o ciclo é lido do arquivo (PERIODO_ATUAL / PERIODO) e conferido com o nome (ÍMPAR/PAR). Você ainda confirma antes de gravar.</small>
       </div>
       <div class="imp-box" id="imp-box" onclick="document.getElementById('csv-input').click()"
            ondrop="dropCSV(event)" ondragover="event.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')">
         <div style="font-size:36px;margin-bottom:6px"></div>
-        <p style="font-weight:700;font-size:14px;margin-bottom:3px">Clique ou arraste o CSV aqui</p>
-        <p style="font-size:12px;color:var(--ct)">BASE_RENOVAVEL_PAR_VOLTA REDONDA.csv · encoding latin1</p>
-        <input type="file" id="csv-input" accept=".csv,.txt" style="display:none" onchange="processCSV(this.files[0])">
+        <p style="font-weight:700;font-size:14px;margin-bottom:3px">Clique ou arraste o(s) CSV aqui</p>
+        <p style="font-size:12px;color:var(--ct)">ÍMPAR e/ou PAR · encoding latin1</p>
+        <input type="file" id="csv-input" accept=".csv,.txt" multiple style="display:none" onchange="enfileirarCSV(this.files)">
       </div>
+      <div id="imp-fila" style="font-size:12px;color:var(--azm);margin-top:6px"></div>
       <div id="imp-status" class="imp-status"></div>
     </div>
   </div>
@@ -3314,155 +3319,242 @@ function removerCurva(periodo) {
 function dropCSV(e) {
   e.preventDefault();
   document.getElementById('imp-box').classList.remove('drag');
-  const f = e.dataTransfer.files[0];
-  if(f) processCSV(f);
+  enfileirarCSV(e.dataTransfer.files);
 }
 
-function processCSV(file) {
-  if(!file) return;
-  const status = document.getElementById('imp-status');
-  status.innerHTML='<p style="color:var(--azm)">⏳ Processando...</p>';
+// ═══════════════════════════════════════════════════════
+//  IMPORTAÇÃO DA BASE (uma por vez, com confirmação do ciclo)
+// ═══════════════════════════════════════════════════════
+// Ciclos com importação em andamento: a sincronização não pode trocar a base
+// local por uma versão antiga do servidor enquanto o envio não terminou.
+window._ciclosImportando = window._ciclosImportando || {};
+window._filaImport = window._filaImport || [];
+window._importAtivo = false;
 
-  // O ciclo vem da coluna PERIODO do próprio CSV (ex: 26.3 → 2026.3).
-  // O campo da tela só é usado se o arquivo não tiver essa coluna.
-  const periodoInformado = normCiclo((document.getElementById('import-periodo')?.value || '').trim());
+function enfileirarCSV(files) {
+  var lista = Array.prototype.slice.call(files || []).filter(Boolean);
+  if(!lista.length) return;
+  lista.forEach(function(f){ window._filaImport.push(f); });
+  var inp = document.getElementById('csv-input'); if(inp) inp.value = '';
+  if(window._importAtivo) {
+    mostrarToast('📋 ' + lista.length + ' arquivo(s) na fila. A importação atual termina primeiro.');
+    renderFilaImport();
+    return;
+  }
+  processarProximoCSV();
+}
+// Compatibilidade com chamadas antigas
+function processCSV(file) { enfileirarCSV(file ? [file] : []); }
 
-  const reader = new FileReader();
+function renderFilaImport() {
+  var el = document.getElementById('imp-fila'); if(!el) return;
+  var nomes = window._filaImport.map(function(f){ return f.name; });
+  el.innerHTML = nomes.length ? '📋 Na fila: ' + nomes.map(escEv).join(', ') : '';
+}
+
+function processarProximoCSV() {
+  var f = window._filaImport.shift();
+  renderFilaImport();
+  if(!f) { window._importAtivo = false; return; }
+  window._importAtivo = true;
+  lerCSVBase(f);
+}
+
+function terminarImportAtual() {
+  window._importAtivo = false;
+  setTimeout(processarProximoCSV, 300);
+}
+
+function paridadeArquivo(nome) {
+  var n = String(nome || '').toUpperCase();
+  if(/IMPAR|ÍMPAR/.test(n)) return 'ÍMPAR';
+  if(/(^|[^IÍ])PAR([^A-Z]|$)/.test(n)) return 'PAR';
+  return '';
+}
+
+// Escolhe o ciclo da base pelas colunas PERIODO_ATUAL e PERIODO e confere com
+// o nome do arquivo (ÍMPAR / PAR). Devolve { ciclo, motivo, alerta }.
+function detectarCicloBase(rows, nomeArquivo, periodoInformado) {
+  var cont = function(col) {
+    var m = {};
+    rows.forEach(function(r){ var c = normCiclo(String(r[col] || '').trim()); if(/^\d{4}\.\d$/.test(c)) m[c] = (m[c] || 0) + 1; });
+    return Object.keys(m).sort(function(a,b){ return m[b] - m[a]; });
+  };
+  var atual = cont('PERIODO_ATUAL'), per = cont('PERIODO');
+  var par = paridadeArquivo(nomeArquivo);
+  var bate = function(c){ return !par || tipoCiclo(c) === par; };
+  if(periodoInformado && /^\d{4}\.\d$/.test(periodoInformado))
+    return { ciclo: periodoInformado, motivo: 'informado na tela', alerta: bate(periodoInformado) ? '' : 'O arquivo parece ser ' + par + ', mas o ciclo informado é ' + tipoCiclo(periodoInformado) + '.' };
+  var cands = atual.map(function(c){ return { c: c, col: 'PERIODO_ATUAL' }; })
+    .concat(per.map(function(c){ return { c: c, col: 'PERIODO' }; }));
+  var ok = cands.filter(function(x){ return bate(x.c); })[0];
+  if(ok) return { ciclo: ok.c, motivo: 'coluna ' + ok.col + (par ? ' · arquivo ' + par : ''), alerta: '' };
+  if(cands.length) return { ciclo: cands[0].c, motivo: 'coluna ' + cands[0].col,
+    alerta: 'O nome do arquivo indica ' + par + ', mas o ciclo encontrado (' + cands[0].c + ') é ' + tipoCiclo(cands[0].c) + '. Confira antes de importar.' };
+  return { ciclo: S.periodo, motivo: 'ciclo aberto na tela (o arquivo não tem PERIODO)', alerta: 'Não encontrei o ciclo no arquivo. Confira antes de importar.' };
+}
+
+function lerCSVBase(file) {
+  var status = document.getElementById('imp-status');
+  if(status) status.innerHTML = '<p style="color:var(--azm)">⏳ Lendo ' + escEv(file.name) + '...</p>';
+  var periodoInformado = normCiclo((document.getElementById('import-periodo') && document.getElementById('import-periodo').value || '').trim());
+  var reader = new FileReader();
+  reader.onerror = function(){ if(status) status.innerHTML = '<p style="color:var(--vm)">❌ Não foi possível ler o arquivo.</p>'; terminarImportAtual(); };
   reader.onload = function(e) {
     try {
-      const text = e.target.result;
-      const lines = text.split(/\r?\n/).filter(Boolean);
-      if(lines.length<2){status.innerHTML='<p style="color:var(--vm)">❌ Arquivo vazio ou inválido.</p>';return;}
-      
-      // Detectar separador
-      const sep = lines[0].includes('\t') ? '\t' : lines[0].includes(';') ? ';' : ',';
-      
-      // Parse simples de CSV respeitando aspas
-      function parseLinha(line) {
-        const r=[]; let cur=''; let inQ=false;
-        for(let c of line){if(c==='"'){inQ=!inQ}else if(c===sep&&!inQ){r.push(cur.trim());cur=''}else{cur+=c}}
+      var lines = String(e.target.result || '').split(/\r?\n/).filter(Boolean);
+      if(lines.length < 2) { status.innerHTML = '<p style="color:var(--vm)">❌ ' + escEv(file.name) + ': arquivo vazio ou inválido.</p>'; terminarImportAtual(); return; }
+      var sep = lines[0].indexOf('\t') >= 0 ? '\t' : lines[0].indexOf(';') >= 0 ? ';' : ',';
+      var parseLinha = function(line) {
+        var r = [], cur = '', inQ = false;
+        for(var k = 0; k < line.length; k++) { var c = line[k]; if(c === '"') inQ = !inQ; else if(c === sep && !inQ) { r.push(cur.trim()); cur = ''; } else cur += c; }
         r.push(cur.trim()); return r;
-      }
-      
-      const headers = parseLinha(lines[0]);
-      const novos = [];
-      
-      for(let i=1;i<lines.length;i++){
+      };
+      var headers = parseLinha(lines[0]).map(function(h){ return h.trim(); });
+      var rows = [], novos = [];
+      var statusSalvos = []; try { statusSalvos = JSON.parse(localStorage.getItem('alunos_status') || '[]'); } catch(er) {}
+      var salvoPorId = {}; statusSalvos.forEach(function(x){ salvoPorId[x.id] = x; });
+      for(var i = 1; i < lines.length; i++) {
         if(!lines[i].trim()) continue;
-        const vals = parseLinha(lines[i]);
-        const row = {};
-        headers.forEach((h,j)=>row[h.trim()]=vals[j]||'');
+        var vals = parseLinha(lines[i]), row = {};
+        headers.forEach(function(h, j){ row[h] = vals[j] || ''; });
         if(!row.COD_MATRICULA && !row.NOM_ALUNO) continue;
-        const aluno = csvParaAluno(row);
-        // Restaurar status dos acionamentos locais (fonte mais confiável)
-        // Hierarquia: Renovado > Trancamento > Em negociação > Evadido > Pendente
-        // O status vindo de acionamentos é aplicado depois, só com os acionamentos
-        // DESTE ciclo (sincronizarStatusAlunos). Assim um "Renovado" de 2026.2 não
-        // passa para o mesmo aluno na base de 2026.4.
-        // Restaurar CPF e estágio do cache local
-        const statusSalvos = JSON.parse(localStorage.getItem('alunos_status')||'[]');
-        const salvo = statusSalvos.find(s=>s.id===aluno.id);
-        if(salvo) {
-          if(salvo.cpfDigitado) aluno.cpfDigitado = salvo.cpfDigitado;
-          if(salvo.elegivelEstagio) aluno.elegivelEstagio = salvo.elegivelEstagio;
-        }
+        rows.push(row);
+        var aluno = csvParaAluno(row);
+        var salvo = salvoPorId[aluno.id];
+        if(salvo) { if(salvo.cpfDigitado) aluno.cpfDigitado = salvo.cpfDigitado; if(salvo.elegivelEstagio) aluno.elegivelEstagio = salvo.elegivelEstagio; }
         novos.push(aluno);
       }
-      
-      // ── Ciclo desta base ──
-      const contCiclo = {};
-      novos.forEach(function(a){ if(a.ciclo) contCiclo[a.ciclo] = (contCiclo[a.ciclo]||0) + 1; });
-      let cicloImp = Object.keys(contCiclo).sort(function(x,y){ return contCiclo[y]-contCiclo[x]; })[0]
-        || periodoInformado || S.periodo;
-      cicloImp = normCiclo(cicloImp);
-      novos.forEach(function(a){ a.ciclo = cicloImp; });
-      // Base antiga sem ciclo (de antes da separação): se for a mesma turma, é substituída
-      const leg = localStorage.getItem('bases_legado');
-      if(leg === cicloImp) localStorage.removeItem('bases_legado');
-      if(leg && leg !== cicloImp && BASES[leg] && BASES[leg].length) {
-        const idsNovos = new Set(novos.map(function(a){ return String(a.id); }));
-        const iguais = BASES[leg].filter(function(a){ return idsNovos.has(String(a.id)); }).length;
-        if(iguais >= BASES[leg].length * 0.5) {
-          const cfgAll = getCicloCfg();
-          if(cfgAll[leg] && !cfgAll[cicloImp]) cfgAll[cicloImp] = Object.assign({}, cfgAll[leg], { ts: Date.now() });
-          if(cfgAll[leg] && !cfgAll[leg].ts) delete cfgAll[leg];
-          setCicloCfg(cfgAll); salvarCicloCfgGAS();
-          try { const hl = localStorage.getItem('histren_'+leg); if(hl && !localStorage.getItem('histren_'+cicloImp)) localStorage.setItem('histren_'+cicloImp, hl); } catch(e) {}
-          delete BASES[leg];
-          localStorage.removeItem('bases_legado');
-        }
-      }
-      definirBaseCiclo(cicloImp, novos);
-      try { const ib = document.getElementById('imp-badge'); if(ib) ib.textContent = novos.length + ' alunos · ciclo ' + cicloImp + ' · ' + new Date().toLocaleString('pt-BR'); } catch(e) {}
-      if(cicloImp !== S.periodo) trocarCiclo(cicloImp, true);
-      else { ALUNOS = novos; renderSeletorCiclo(); }
-      salvarDados(); // salvar cache;
-      localStorage.setItem('ultImp', new Date().toLocaleString('pt-BR'));
-      salvarDados();
-      
-      const ren=ALUNOS.filter(a=>a.status==='Renovado').length;
-      const pen=ALUNOS.filter(a=>a.status==='Pendente').length;
-      const neg=ALUNOS.filter(a=>a.status==='Em negociação').length;
-      
-      status.innerHTML=`<div style="background:var(--vdb);border:1px solid var(--vd);border-radius:8px;padding:12px;margin-top:10px">
-        <p style="color:var(--vd);font-weight:700;font-size:14px;margin-bottom:6px">&#10003; Importação concluída!</p>
-        <p style="font-size:13px"><strong>Ciclo ${cicloImp} (${tipoCiclo(cicloImp)})</strong> · ${novos.length} alunos importados · Renovados: ${ren} · Pendentes: ${pen} · Negociando: ${neg}</p>
-        <p style="font-size:12px;color:var(--ct)">Só a base deste ciclo foi substituída. Os outros ciclos continuam como estavam.</p>
-        <p id="imp-confirma" style="font-size:12px;font-weight:700;margin-top:4px">⏳ Enviando para o servidor...</p>
-        <div style="margin-top:8px;display:flex;gap:7px">
-          <button class="btn bp bpq" onclick="ir('alunos')">🎓 Ver Alunos</button>
-          <button class="btn bs bpq" onclick="ir('dash')">Dashboard</button>
-        </div>
-      </div>`;
-      
-      // Aplicar status dos acionamentos na nova base antes de mostrar
-      try { sincronizarStatusAlunos(); } catch(e) {}
-      // Recalcular contadores com status correto
-      const ren2=ALUNOS.filter(a=>a.status==='Renovado').length;
-      mostrarToast('&#10003; ' + novos.length + ' alunos importados! Renovados: ' + ren2);
-      try { checkAlertas(); rDash(); } catch(e) {}
-      // Sincronizar com GAS
-      const _gasUrl = localStorage.getItem('gasUrl');
-      if(_gasUrl) {
-        mostrarToast('Enviando base para o servidor (pode levar alguns segundos)...');
-        window._confirmarImport = function() {
-          gasGet('ping').then(function(pg) {
-            var n = pg && pg.totaisCiclo ? (parseInt(pg.totaisCiclo[cicloImp]) || 0) : null;
-            var el = document.getElementById('imp-confirma');
-            var ok = n === novos.length;
-            var txt = n === null
-              ? '&#9888;️ O servidor não informou os ciclos. Confira se o GAS v6 está publicado (?acao=ping deve mostrar versao 6.0).'
-              : ok ? '&#10003; Servidor confirmou ' + n + ' alunos no ciclo ' + cicloImp + '.'
-                   : '&#9888;️ Servidor tem ' + n + ' alunos no ciclo ' + cicloImp + ', esperado ' + novos.length + '. Importe de novo.';
-            if(el) el.innerHTML = txt;
-            mostrarToast(txt);
-          }).catch(function(){});
-        };
-        gasPost('importar_alunos', { alunos: novos, ciclo: cicloImp })
-          .then(function(d){
-            if(d.ok && d.semConfirmacao) {
-              // Payload grande: enviado sem leitura de resposta. Confere no servidor.
-              setTimeout(window._confirmarImport, 10000);
-            } else if(d.ok) {
-              window._confirmarImport();
-            } else {
-              var el = document.getElementById('imp-confirma');
-              if(el) el.innerHTML = '&#9888;️ Erro ao salvar no servidor: ' + (d.erro||'desconhecido');
-              mostrarToast('&#9888;️ Erro ao salvar no servidor: ' + (d.erro||'desconhecido'));
-            }
-          })
-          .catch(function(err){
-            var el = document.getElementById('imp-confirma');
-            if(el) el.innerHTML = '&#10007; Falha ao enviar para o servidor: ' + err.message;
-            mostrarToast('&#10007; Falha ao enviar para o servidor: ' + err.message);
-          });
-      }
-      checkAlertas();
+      if(!novos.length) { status.innerHTML = '<p style="color:var(--vm)">❌ ' + escEv(file.name) + ': nenhum aluno encontrado.</p>'; terminarImportAtual(); return; }
+      var det = detectarCicloBase(rows, file.name, periodoInformado);
+      confirmarCicloImport(file, novos, det);
     } catch(err) {
-      status.innerHTML=`<p style="color:var(--vm)">❌ Erro: ${err.message}</p>`;
+      if(status) status.innerHTML = '<p style="color:var(--vm)">❌ Erro: ' + escEv(err.message) + '</p>';
+      terminarImportAtual();
     }
   };
   reader.readAsText(file, 'latin1');
+}
+
+// Mostra o que vai ser importado e onde, e só grava depois do "Importar"
+function confirmarCicloImport(file, novos, det) {
+  var status = document.getElementById('imp-status');
+  var conds = {};
+  novos.forEach(function(a){ var c = a.condicao || '—'; conds[c] = (conds[c] || 0) + 1; });
+  var resumoCond = Object.keys(conds).sort(function(a,b){ return conds[b] - conds[a]; })
+    .map(function(c){ return escEv(c) + ': <strong>' + conds[c] + '</strong>'; }).join(' · ');
+  var ciclos = cicloLista().slice();
+  [det.ciclo].forEach(function(c){ if(ciclos.indexOf(c) < 0) ciclos.push(c); });
+  ciclos.sort();
+  var atual = BASES[det.ciclo] ? BASES[det.ciclo].length : 0;
+  window._importPendente = { file: file, novos: novos };
+  status.innerHTML = '<div style="background:#fff;border:2px solid ' + (det.alerta ? 'var(--la)' : 'var(--azm)') + ';border-radius:10px;padding:14px;margin-top:10px">'
+    + '<p style="font-weight:700;font-size:14px;margin-bottom:6px">Confirme a importação</p>'
+    + '<p style="font-size:13px;margin-bottom:6px">Arquivo <strong>' + escEv(file.name) + '</strong> · <strong>' + novos.length + '</strong> alunos</p>'
+    + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px"><label style="margin:0;font-size:13px">Gravar no ciclo</label>'
+    + '<select id="imp-ciclo-sel" style="font-weight:700" onchange="document.getElementById(\'imp-subst\').textContent=(BASES[this.value]?BASES[this.value].length:0)">'
+    + ciclos.map(function(c){ return '<option value="' + c + '"' + (c === det.ciclo ? ' selected' : '') + '>' + c + ' · ' + tipoCiclo(c) + '</option>'; }).join('')
+    + '</select><span style="font-size:11px;color:var(--ct)">detectado pela ' + escEv(det.motivo) + '</span></div>'
+    + (det.alerta ? '<p style="font-size:12px;background:var(--lab);color:var(--la);border-radius:6px;padding:7px 10px;margin-bottom:6px">⚠️ ' + escEv(det.alerta) + '</p>' : '')
+    + '<p style="font-size:12px;color:var(--ct);margin-bottom:6px">Substitui a base atual desse ciclo (<span id="imp-subst">' + atual + '</span> alunos). Os outros ciclos não mudam.</p>'
+    + '<p style="font-size:11px;color:var(--ct);margin-bottom:10px">Condições no arquivo: ' + resumoCond + '</p>'
+    + '<div style="display:flex;gap:8px"><button class="btn bp" onclick="executarImportBase()">📥 Importar</button>'
+    + '<button class="btn bs" onclick="cancelarImportBase()">Cancelar</button></div></div>';
+}
+
+function cancelarImportBase() {
+  window._importPendente = null;
+  var st = document.getElementById('imp-status'); if(st) st.innerHTML = '<p style="color:var(--ct);font-size:12px">Importação cancelada.</p>';
+  terminarImportAtual();
+}
+
+function executarImportBase() {
+  var pend = window._importPendente; if(!pend) return;
+  window._importPendente = null;
+  var sel = document.getElementById('imp-ciclo-sel');
+  var cicloImp = normCiclo(sel ? sel.value : S.periodo);
+  var novos = pend.novos, file = pend.file;
+  var status = document.getElementById('imp-status');
+  novos.forEach(function(a){ a.ciclo = cicloImp; });
+
+  // Base antiga sem ciclo (de antes da separação): se for a mesma turma, é substituída
+  var leg = localStorage.getItem('bases_legado');
+  if(leg === cicloImp) localStorage.removeItem('bases_legado');
+  if(leg && leg !== cicloImp && BASES[leg] && BASES[leg].length) {
+    var idsNovos = new Set(novos.map(function(a){ return String(a.id); }));
+    var iguais = BASES[leg].filter(function(a){ return idsNovos.has(String(a.id)); }).length;
+    if(iguais >= BASES[leg].length * 0.5) {
+      var cfgAll = getCicloCfg();
+      if(cfgAll[leg] && !cfgAll[cicloImp]) cfgAll[cicloImp] = Object.assign({}, cfgAll[leg], { ts: Date.now() });
+      if(cfgAll[leg] && !cfgAll[leg].ts) delete cfgAll[leg];
+      setCicloCfg(cfgAll); salvarCicloCfgGAS();
+      try { var hl = localStorage.getItem('histren_'+leg); if(hl && !localStorage.getItem('histren_'+cicloImp)) localStorage.setItem('histren_'+cicloImp, hl); } catch(e) {}
+      delete BASES[leg];
+      localStorage.removeItem('bases_legado');
+    }
+  }
+  window._ciclosImportando[cicloImp] = Date.now();
+  definirBaseCiclo(cicloImp, novos);
+  var agoraTxt = new Date().toLocaleString('pt-BR');
+  try { localStorage.setItem('ultImp_' + cicloImp, agoraTxt); localStorage.setItem('impArq_' + cicloImp, file.name); } catch(e) {}
+  localStorage.setItem('ultImp', agoraTxt);
+  if(cicloImp !== S.periodo) trocarCiclo(cicloImp, true);
+  else { ALUNOS = BASES[cicloImp]; renderSeletorCiclo(); }
+  try { sincronizarStatusAlunos(); } catch(e) {}
+  salvarDados();
+  try { rImportar(); } catch(e) {}
+  status = document.getElementById('imp-status');
+
+  var ren = ALUNOS.filter(function(a){ return a.status === 'Renovado'; }).length;
+  var pen = ALUNOS.filter(function(a){ return a.status === 'Pendente'; }).length;
+  var neg = ALUNOS.filter(function(a){ return a.status === 'Em negociação'; }).length;
+  if(status) status.innerHTML = '<div style="background:var(--vdb);border:1px solid var(--vd);border-radius:8px;padding:12px;margin-top:10px">'
+    + '<p style="color:var(--vd);font-weight:700;font-size:14px;margin-bottom:6px">&#10003; ' + escEv(file.name) + ' importado</p>'
+    + '<p style="font-size:13px"><strong>Ciclo ' + cicloImp + ' (' + tipoCiclo(cicloImp) + ')</strong> · ' + novos.length + ' alunos · Renovados: ' + ren + ' · Pendentes: ' + pen + ' · Negociando: ' + neg + '</p>'
+    + '<p id="imp-confirma" style="font-size:12px;font-weight:700;margin-top:4px">⏳ Enviando para o servidor... não feche a página.</p>'
+    + '<div style="margin-top:8px;display:flex;gap:7px"><button class="btn bp bpq" onclick="ir(\'alunos\')">🎓 Ver Alunos</button><button class="btn bs bpq" onclick="ir(\'dash\')">Dashboard</button></div></div>';
+  try { checkAlertas(); } catch(e) {}
+
+  if(!localStorage.getItem('gasUrl')) { delete window._ciclosImportando[cicloImp]; terminarImportAtual(); return; }
+  enviarBaseServidor(cicloImp, novos, 1);
+}
+
+// Envia ao servidor e só libera a próxima importação depois que o servidor
+// confirmar a quantidade de alunos do ciclo.
+function enviarBaseServidor(cicloImp, novos, tentativa) {
+  var setMsg = function(txt) { var el = document.getElementById('imp-confirma'); if(el) el.innerHTML = txt; };
+  var fim = function(ok, txt) {
+    setMsg(txt); mostrarToast(txt);
+    if(ok) {
+      // Marca a versão do servidor como já vista: evita baixar de novo a base que acabou de subir
+      gasGet('config').then(function(cfg) {
+        var v = cfg && cfg['ultima_atualizacao_' + cicloImp];
+        if(v) localStorage.setItem('base_versao_' + cicloImp, String(v));
+      }).catch(function(){}).then(function(){ delete window._ciclosImportando[cicloImp]; terminarImportAtual(); });
+    } else {
+      delete window._ciclosImportando[cicloImp];
+      window._reenviarBase = function(){ window._ciclosImportando[cicloImp] = Date.now(); window._importAtivo = true; setMsg('⏳ Enviando de novo...'); enviarBaseServidor(cicloImp, novos, 1); };
+      setMsg(txt + ' <button class="btn bs bpq" onclick="window._reenviarBase()">Enviar de novo</button>');
+      terminarImportAtual();
+    }
+  };
+  // Confere no servidor quantos alunos ficaram no ciclo (até 6 tentativas, 10s entre elas)
+  var conferir = function(rest) {
+    gasGet('ping').then(function(pg) {
+      var n = pg && pg.totaisCiclo ? (parseInt(pg.totaisCiclo[cicloImp]) || 0) : null;
+      if(n === null) return fim(false, '⚠️ O servidor não informou os ciclos. Confira se o GAS está publicado.');
+      if(n === novos.length) return fim(true, '&#10003; Servidor confirmou ' + n + ' alunos no ciclo ' + cicloImp + '.');
+      if(rest > 0) { setMsg('⏳ Servidor ainda gravando (' + n + ' de ' + novos.length + ')...'); return setTimeout(function(){ conferir(rest - 1); }, 10000); }
+      fim(false, '⚠️ Servidor tem ' + n + ' alunos no ciclo ' + cicloImp + ', esperado ' + novos.length + '.');
+    }).catch(function(){ if(rest > 0) setTimeout(function(){ conferir(rest - 1); }, 10000); else fim(false, '⚠️ Não consegui confirmar no servidor.'); });
+  };
+  gasPost('importar_alunos', { alunos: novos, ciclo: cicloImp })
+    .then(function(d) {
+      if(d && d.ok && d.semConfirmacao) { setMsg('⏳ Enviado. Conferindo no servidor...'); setTimeout(function(){ conferir(6); }, 10000); }
+      else if(d && d.ok) conferir(3);
+      else fim(false, '⚠️ Erro ao salvar no servidor: ' + escEv((d && d.erro) || 'desconhecido'));
+    })
+    .catch(function(err){ fim(false, '✗ Falha ao enviar para o servidor: ' + escEv(err.message)); });
 }
 
 function salvarDriveUrl() {
