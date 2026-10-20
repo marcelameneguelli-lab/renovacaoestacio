@@ -816,7 +816,13 @@ let ENVIOS = JSON.parse(localStorage.getItem('envios_v2')||'[]');
 //  selecionado (S.periodo). Acionamentos, envios e follow-ups gravam o ciclo.
 // ═══════════════════════════════════════════
 function normCiclo(p) {
+  // A planilha às vezes devolve o ciclo "2026.4" como data (abril/2026)
+  if(p instanceof Date && !isNaN(p.getTime())) return p.getFullYear() + '.' + (p.getMonth() + 1);
   p = String(p == null ? '' : p).trim().replace(',', '.');
+  if(/^[A-Za-z]{3} [A-Za-z]{3} \d{2} \d{4}/.test(p) || /^\d{4}-\d{2}-\d{2}T/.test(p)) {
+    var _d = new Date(p);
+    if(!isNaN(_d.getTime())) return _d.getFullYear() + '.' + (_d.getMonth() + 1);
+  }
   var m = p.match(/^(\d{2})\.(\d)$/);
   if(m) return '20' + m[1] + '.' + m[2];
   // Planilha em português transforma "2026.3" em 20263 (ponto vira separador de milhar)
@@ -1085,8 +1091,9 @@ function cicloDoAc(ac) {
   if(!ac) return '';
   var cands = idxCiclos()[String(ac.alunoId)] || [];
   var r = '';
-  if(ac.ciclo) {
-    var cg = normCiclo(ac.ciclo);
+  var _cgTeste = ac.ciclo ? normCiclo(ac.ciclo) : '';
+  if(_cgTeste && /^\d{4}\.\d$/.test(_cgTeste)) {
+    var cg = _cgTeste;
     // Ciclo gravado errado: só corrige quando a base daquele ciclo está carregada
     // e o aluno não está nela. Base não carregada (ciclo antigo) = confia no gravado.
     var baseCg = BASES[cg];
@@ -5198,7 +5205,7 @@ function rProdutividade() {
 function acEhLote(ac) { return /^envio em (lote|massa):/i.test(String(ac && ac.obs || '').trim()); }
 // Data do acionamento (DD/MM/AAAA, AAAA-MM-DD ou ISO). Se vier invertida (MM/DD), corrige.
 function dataDoAc(ac) {
-  var s = String(ac && ac.data || '').trim(); if(!s) return null;
+  var s = normalizarFuData(ac && ac.data); if(!s) return null;
   var d = null;
   if(s.indexOf('/') >= 0) {
     var p = s.split('/'); var dd = parseInt(p[0]), mm = parseInt(p[1]), aa = parseInt(p[2]);
@@ -6470,7 +6477,10 @@ function testarGAS() {
 // ═══════════════════════════════════════
 
 // Fila para acionamentos nao enviados (offline)
-window._gasQueue = window._gasQueue || [];
+window._gasQueue = window._gasQueue || (function(){ try { return JSON.parse(localStorage.getItem('gas_fila') || '[]') || []; } catch(e) { return []; } })();
+// A fila de envio fica guardada: se a pessoa fechar a página antes do servidor
+// responder, o acionamento é reenviado na próxima vez que ela entrar.
+setInterval(function(){ try { localStorage.setItem('gas_fila', JSON.stringify(window._gasQueue || [])); } catch(e) {} }, 3000);
 
 // POST para o GAS sem preflight CORS
 // Usando text/plain evita o OPTIONS preflight que o GAS nao responde
