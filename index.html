@@ -1180,9 +1180,14 @@ function salvarDados() {
       if(!BASES[c] || !BASES[c].length) return;
       cacheB[c] = BASES[c].map(function(a){ return Object.assign({}, a, { acionamentos: [] }); });
     });
-    localStorage.setItem('bases_cache', JSON.stringify(cacheB));
     localStorage.removeItem('alunos_cache');
+    localStorage.setItem('bases_cache', JSON.stringify(cacheB));
+    // Folga: se depois da cópia das bases não sobrar espaço para sessão,
+    // fila e acionamentos novos, a cópia sai (ela volta do servidor)
+    localStorage.setItem('_folga', new Array(150001).join('x'));
+    localStorage.removeItem('_folga');
   } catch(e) {
+    try { localStorage.removeItem('_folga'); } catch(e2) {}
     // Quota excedida: sem cache local, a base volta do servidor ao abrir
     try { localStorage.removeItem('bases_cache'); } catch(e2) {}
     console.warn('Cache de bases não coube no navegador; será recarregado do servidor.');
@@ -4953,11 +4958,37 @@ function aplicarMenuPerfil() {
 //  LOGIN
 // ═══════════════════════════════════════════════════════
 function sessaoAtual() {
-  try {
-    var s = JSON.parse(localStorage.getItem('sessao') || 'null');
-    if(s && s.token && s.exp > Date.now()) return s;
-  } catch(e) {}
+  var fontes = [function(){ return localStorage.getItem('sessao'); }, function(){ return sessionStorage.getItem('sessao'); }];
+  for(var i = 0; i < fontes.length; i++) {
+    try {
+      var s = JSON.parse(fontes[i]() || 'null');
+      if(s && s.token && s.exp > Date.now()) return s;
+    } catch(e) {}
+  }
   return null;
+}
+// Libera espaço do navegador apagando o que pode ser baixado de novo do servidor
+// (cópia das bases de alunos e envios). Os acionamentos e a fila de envio ficam.
+function liberarEspacoLocal() {
+  var manter = { sessao:1, acionamentos_v2:1, gas_fila:1, gasUrl:1, gasUrlVersao:1, ciclo_cfg:1, periodo:1, ultimoEmail:1 };
+  ['bases_cache','alunos_cache','envios_v2'].forEach(function(k){ try { localStorage.removeItem(k); } catch(e) {} });
+  try {
+    var grandes = [];
+    for(var i = 0; i < localStorage.length; i++) {
+      var k = localStorage.key(i);
+      if(manter[k]) continue;
+      var v = localStorage.getItem(k) || '';
+      if(v.length > 100000) grandes.push(k);
+    }
+    grandes.forEach(function(k){ try { localStorage.removeItem(k); } catch(e) {} });
+  } catch(e) {}
+}
+function guardarSessao(obj) {
+  var txt = JSON.stringify(obj);
+  try { localStorage.setItem('sessao', txt); return; } catch(e) {}
+  liberarEspacoLocal();
+  try { localStorage.setItem('sessao', txt); return; } catch(e) {}
+  try { sessionStorage.setItem('sessao', txt); } catch(e) {}
 }
 function mostrarLogin(msg) {
   var w = document.getElementById('login-wrap'); if(!w) return;
@@ -4984,8 +5015,8 @@ function fazerLoginSistema() {
       if(msg.indexOf('desconhecida') >= 0) msg = 'O servidor ainda está na versão antiga. Publique o GAS v6.3.';
       erroLogin('lg-erro', msg); return;
     }
-    localStorage.setItem('ultimoEmail', email);
-    localStorage.setItem('sessao', JSON.stringify({ token:d.token, exp:d.exp, nome:d.nome, email:d.email, perfil:d.perfil }));
+    guardarSessao({ token:d.token, exp:d.exp, nome:d.nome, email:d.email, perfil:d.perfil });
+    try { localStorage.setItem('ultimoEmail', email); } catch(e) {}
     if(d.trocarSenha) { window._senhaAtualTroca = senha; mostrarTrocaSenha(false); return; }
     entrarNoSistema();
   }).catch(function(err) {
@@ -5041,7 +5072,7 @@ function entrarNoSistema() {
 function sessaoExpirou() {
   if(window._sessaoAvisada) return;
   window._sessaoAvisada = true;
-  localStorage.removeItem('sessao');
+  try { localStorage.removeItem('sessao'); sessionStorage.removeItem('sessao'); } catch(e) {}
   if(window._rtInterval) { clearInterval(window._rtInterval); window._rtInterval = null; }
   try { document.querySelectorAll('.mo.on').forEach(function(m){ m.classList.remove('on'); }); } catch(e) {}
   mostrarLogin(window._sistemaIniciado ? 'Sua sessão terminou. Entre novamente para continuar.' : '');
@@ -5052,6 +5083,7 @@ function sairDoSistema() {
   if(!confirm(pend ? 'Ainda há ' + pend + ' registro(s) sendo enviados ao servidor. Sair mesmo assim? Eles podem ser perdidos.' : 'Sair do sistema? Os dados guardados neste navegador serão apagados.')) return;
   var fim = function() {
     ['sessao','bases_cache','alunos_cache','acionamentos_v2','envios_v2','alunos_status','colab','recados','fuConcluidos'].forEach(function(k){ try { localStorage.removeItem(k); } catch(e) {} });
+    try { sessionStorage.removeItem('sessao'); } catch(e) {}
     location.reload();
   };
   gasPost('logout', {}).then(fim, fim);
