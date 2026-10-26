@@ -1,52 +1,36 @@
-// Service Worker — Sistema de Renovação de Matrícula (Estácio Volta Redonda)
-// Objetivo: permitir "Instalar app" e funcionar como PWA.
-// IMPORTANTE: nunca armazena em cache as chamadas ao Google Apps Script —
-// os dados de alunos/acionamentos precisam estar sempre atualizados.
-// Só o "esqueleto" do app (HTML, ícones, manifest) fica em cache, como
-// respaldo para quando não há internet.
+// RenovaVR · Service Worker
+// Página e arquivos do sistema: busca SEMPRE a versão mais nova na internet e
+// só usa a cópia guardada quando estiver sem conexão. Assim toda publicação
+// nova chega aos computadores sem precisar limpar nada.
+// O servidor (script.google.com) nunca passa por aqui.
+const CACHE = 'renovavr-v2';
 
-const CACHE_NAME = 'renovacao-estacio-v1';
-const ASSETS = [
-  './',
-  './index.html',
-  './manifest.json',
-];
+self.addEventListener('install', function(e) { self.skipWaiting(); });
 
-self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(ASSETS))
-      .catch(() => {})
+self.addEventListener('activate', function(e) {
+  e.waitUntil(
+    caches.keys()
+      .then(function(ks) { return Promise.all(ks.filter(function(k) { return k !== CACHE; }).map(function(k) { return caches.delete(k); })); })
+      .then(function() { return self.clients.claim(); })
   );
-  self.skipWaiting();
 });
 
-self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((names) =>
-      Promise.all(names.filter((n) => n !== CACHE_NAME).map((n) => caches.delete(n)))
-    )
-  );
-  self.clients.claim();
-});
-
-self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url);
-
-  // Só intercepta requisições do MESMO domínio (o app em si: HTML, ícones,
-  // manifest). Chamadas para script.google.com (outro domínio) passam
-  // direto para a rede, sem cache — os dados precisam ser sempre os
-  // mais recentes.
-  if (url.origin !== self.location.origin) return;
-  if (event.request.method !== 'GET') return;
-
-  event.respondWith(
-    fetch(event.request)
-      .then((resposta) => {
-        const copia = resposta.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copia));
-        return resposta;
+self.addEventListener('fetch', function(e) {
+  var req = e.request;
+  if (req.method !== 'GET') return;
+  var url = new URL(req.url);
+  if (url.origin !== self.location.origin) return; // GAS, CDNs: direto na rede
+  e.respondWith(
+    fetch(req, { cache: 'no-store' })
+      .then(function(resp) {
+        if (resp && resp.ok) {
+          var copia = resp.clone();
+          caches.open(CACHE).then(function(c) { c.put(req, copia); }).catch(function() {});
+        }
+        return resp;
       })
-      .catch(() => caches.match(event.request))
+      .catch(function() {
+        return caches.match(req).then(function(r) { return r || caches.match('index.html') || caches.match('./'); });
+      })
   );
 });

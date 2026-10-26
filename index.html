@@ -631,7 +631,7 @@ window.addEventListener('unhandledrejection', function(e) {
 <script>
 
 
-const VERSAO_SISTEMA = '2.1.0 · menu e acessos · 12/10/2026';
+const VERSAO_SISTEMA = '2.2.0 · 22/10/2026';
 const EMAIL_RELATORIO_DIARIO = 'marques.marcela@estacio.br';
 
 // ═══════════════════════════════════════════
@@ -4983,6 +4983,24 @@ function liberarEspacoLocal() {
     grandes.forEach(function(k){ try { localStorage.removeItem(k); } catch(e) {} });
   } catch(e) {}
 }
+// Qualquer gravação no navegador que falhar por falta de espaço libera a cópia
+// das bases (que volta do servidor) e tenta de novo. Antes, a falha era
+// silenciosa: boas-vindas, follow-ups concluídos e recados vindos de outro
+// computador simplesmente não eram guardados.
+(function() {
+  if(window._setItemProtegido) return;
+  window._setItemProtegido = true;
+  var orig = Storage.prototype.setItem;
+  Storage.prototype.setItem = function(k, v) {
+    try { return orig.call(this, k, v); }
+    catch(e) {
+      var cota = /quota|exceed/i.test(String(e && (e.name + ' ' + e.message)));
+      if(!cota || this !== window.localStorage || k === 'bases_cache' || k === '_folga') throw e;
+      try { liberarEspacoLocal(); } catch(e2) {}
+      return orig.call(this, k, v);
+    }
+  };
+})();
 function guardarSessao(obj) {
   var txt = JSON.stringify(obj);
   try { localStorage.setItem('sessao', txt); return; } catch(e) {}
@@ -7483,12 +7501,20 @@ function salvarBvTpl(t) {
   if(localStorage.getItem('gasUrl')) gasPost('salvar_config', { chave: 'bv_tpl_v2', valor: JSON.stringify(t) }).catch(function(){});
 }
 function bvKey(c) { return 'bv_' + (c || S.periodo); }
+window._bvMem = window._bvMem || {};
 function getBvSet(c) {
-  try { return new Set((JSON.parse(localStorage.getItem(bvKey(c)) || '[]') || []).map(String)); } catch(e) { return new Set(); }
+  var set = new Set();
+  try { (JSON.parse(localStorage.getItem(bvKey(c)) || '[]') || []).forEach(function(id){ set.add(String(id)); }); } catch(e) {}
+  (window._bvMem[bvKey(c)] || []).forEach(function(id){ set.add(String(id)); });
+  return set;
+}
+function guardarBvSet(set, c) {
+  var arr = Array.from(set);
+  window._bvMem[bvKey(c)] = arr;
+  try { localStorage.setItem(bvKey(c), JSON.stringify(arr)); } catch(e) {}
 }
 function salvarBvSet(set, c, sincronizar) {
-  var arr = Array.from(set);
-  localStorage.setItem(bvKey(c), JSON.stringify(arr));
+  guardarBvSet(set, c);
   if(sincronizar !== false && localStorage.getItem('gasUrl')) {
     gasGet('config').then(function(cfg) {
       if(cfg && cfg[bvKey(c)]) mesclarBv(cfg[bvKey(c)], c);
@@ -7501,15 +7527,65 @@ function mesclarBv(txt, c) {
   try {
     var set = getBvSet(c), mudou = false;
     (JSON.parse(txt || '[]') || []).forEach(function(id){ id = String(id); if(!set.has(id)) { set.add(id); mudou = true; } });
-    if(mudou) localStorage.setItem(bvKey(c), JSON.stringify(Array.from(set)));
+    if(mudou) guardarBvSet(set, c);
     return mudou;
   } catch(e) { return false; }
 }
+// Marca alunos que já receberam boas-vindas. Junta as marcações de alguns
+// instantes e manda numa única gravação: o servidor soma com a lista que já
+// tem (nada é perdido quando vários envios em lote terminam juntos).
+window._bvPend = window._bvPend || {};
 function marcarBoasVindas(ids, c) {
+  c = c || S.periodo;
   var set = getBvSet(c);
   ids.forEach(function(id){ set.add(String(id)); });
-  salvarBvSet(set, c);
+  salvarBvSet(set, c, false);
+  var p = window._bvPend[c] = window._bvPend[c] || {};
+  ids.forEach(function(id){ p[String(id)] = 1; });
+  try { localStorage.setItem('bv_pend', JSON.stringify(window._bvPend)); } catch(e) {}
+  clearTimeout(window._bvTimer);
+  window._bvTimer = setTimeout(enviarBvPendentes, 1500);
   atualizarBadgeBv();
+}
+function enviarBvPendentes() {
+  if(!localStorage.getItem('gasUrl') || window._bvEnviando) return;
+  var ciclos = Object.keys(window._bvPend || {}).filter(function(c){ return Object.keys(window._bvPend[c] || {}).length; });
+  if(!ciclos.length) return;
+  var c = ciclos[0], ids = Object.keys(window._bvPend[c]);
+  window._bvEnviando = true;
+  var fim = function(ok) {
+    window._bvEnviando = false;
+    if(ok) {
+      ids.forEach(function(id){ delete window._bvPend[c][id]; });
+      try { localStorage.setItem('bv_pend', JSON.stringify(window._bvPend)); } catch(e) {}
+      if(ciclos.length > 1 || Object.keys(window._bvPend[c]).length) setTimeout(enviarBvPendentes, 300);
+    } else setTimeout(enviarBvPendentes, 15000);
+  };
+  gasPost('bv_marcar', { ciclo: c, ids: ids }).then(function(d) {
+    if(d && d.ok && d.lista) {
+      if(mesclarBv(JSON.stringify(d.lista), c)) { try { atualizarBadgeBv(); if(window._telaAtiva === 'boasvindas') rBoasVindas(); } catch(e) {} }
+      return fim(true);
+    }
+    if(d && d.erro && d.erro.indexOf('desconhecida') >= 0) {
+      // Servidor antigo: grava a lista inteira do jeito anterior
+      salvarBvSet(getBvSet(c), c, true);
+      return fim(true);
+    }
+    fim(false);
+  }).catch(function(){ fim(false); });
+}
+// Marcações que não chegaram ao servidor (página fechada antes) vão na próxima abertura
+try { window._bvPend = JSON.parse(localStorage.getItem('bv_pend') || '{}') || {}; } catch(e) { window._bvPend = {}; }
+setTimeout(enviarBvPendentes, 8000);
+// Ao abrir a tela de Boas-vindas, busca na hora o que a equipe já marcou
+function atualizarBvDoServidor() {
+  if(!localStorage.getItem('gasUrl')) return;
+  var c = S.periodo;
+  gasGet('config').then(function(cfg) {
+    if(cfg && cfg[bvKey(c)] && mesclarBv(cfg[bvKey(c)], c)) {
+      try { atualizarBadgeBv(); if(window._telaAtiva === 'boasvindas') rBoasVindas(true); } catch(e) {}
+    }
+  }).catch(function(){});
 }
 function filaBoasVindas() {
   try { sincronizarStatusAlunos(); } catch(e) {}
@@ -7529,7 +7605,8 @@ function atualizarBadgeBv() {
   return n;
 }
 
-function rBoasVindas() {
+function rBoasVindas(semBuscar) {
+  if(!semBuscar) { try { atualizarBvDoServidor(); } catch(e) {} }
   var fila = filaBoasVindas();
   var cfg = getCicloCfg()[S.periodo] || {};
   var t = getBvTpl();
@@ -8557,11 +8634,50 @@ function iniciarRegistroAcesso() {
 // ═══ PWA — registrar o Service Worker (permite instalar como app) ═══
 if('serviceWorker' in navigator) {
   window.addEventListener('load', function() {
-    navigator.serviceWorker.register('sw.js')
-      .then(function(reg) { console.log('[PWA] Service Worker registrado:', reg.scope); })
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+      .then(function(reg) {
+        console.log('[PWA] Service Worker registrado:', reg.scope);
+        setInterval(function(){ try { reg.update(); } catch(e) {} }, 30 * 60 * 1000);
+      })
       .catch(function(err) { console.warn('[PWA] Falha ao registrar Service Worker:', err.message); });
   });
 }
+
+// ═══ Aviso de versão nova ═══
+// A página pode ficar aberta por dias (app instalado). A cada 30 min confere se
+// foi publicada uma versão nova do sistema e mostra um aviso para atualizar.
+function verificarVersaoNova() {
+  if(!/^https?:/.test(location.protocol)) return;
+  fetch(location.pathname + '?v=' + Date.now(), { cache: 'no-store' })
+    .then(function(r){ return r.ok ? r.text() : ''; })
+    .then(function(html) {
+      var m = html && html.match(/const VERSAO_SISTEMA = '([^']+)'/);
+      if(!m || m[1] === VERSAO_SISTEMA) return;
+      var el = document.getElementById('aviso-versao');
+      if(!el) {
+        el = document.createElement('div');
+        el.id = 'aviso-versao';
+        el.style.cssText = 'position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:10001;background:#0A3D8F;color:#fff;border-radius:10px;padding:10px 14px;font-size:13px;display:flex;gap:10px;align-items:center;box-shadow:0 6px 20px rgba(0,0,0,.25)';
+        el.innerHTML = '🔄 Há uma versão nova do sistema. <button class="btn bs bpq" style="background:#fff" onclick="atualizarSistema()">Atualizar agora</button>';
+        document.body.appendChild(el);
+      }
+    }).catch(function(){});
+}
+function atualizarSistema() {
+  var pend = (window._gasQueue || []).length;
+  if(pend && !confirm('Ainda há ' + pend + ' registro(s) sendo enviados. Atualizar mesmo assim? Eles continuam guardados e são reenviados depois.')) return;
+  try { localStorage.setItem('gas_fila', JSON.stringify(window._gasQueue || [])); } catch(e) {}
+  var recarregar = function(){ location.reload(); };
+  if('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations().then(function(regs) {
+      return Promise.all(regs.map(function(r){ return r.update().catch(function(){}); }));
+    }).then(function() {
+      if(window.caches) return caches.keys().then(function(ks){ return Promise.all(ks.map(function(k){ return caches.delete(k); })); });
+    }).catch(function(){}).then(recarregar);
+  } else recarregar();
+}
+setTimeout(verificarVersaoNova, 60 * 1000);
+setInterval(verificarVersaoNova, 30 * 60 * 1000);
 </script>
 </body>
 </html>
