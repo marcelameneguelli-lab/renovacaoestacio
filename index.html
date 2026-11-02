@@ -631,7 +631,7 @@ window.addEventListener('unhandledrejection', function(e) {
 <script>
 
 
-const VERSAO_SISTEMA = '2.2.0 · 22/10/2026';
+const VERSAO_SISTEMA = '2.2.1 · 02/11/2026';
 const EMAIL_RELATORIO_DIARIO = 'marques.marcela@estacio.br';
 
 // ═══════════════════════════════════════════
@@ -8634,7 +8634,7 @@ function iniciarRegistroAcesso() {
 // ═══ PWA — registrar o Service Worker (permite instalar como app) ═══
 if('serviceWorker' in navigator) {
   window.addEventListener('load', function() {
-    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+    navigator.serviceWorker.register('sw.js', { scope: './', updateViaCache: 'none' })
       .then(function(reg) {
         console.log('[PWA] Service Worker registrado:', reg.scope);
         setInterval(function(){ try { reg.update(); } catch(e) {} }, 30 * 60 * 1000);
